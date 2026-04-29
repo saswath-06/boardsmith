@@ -305,10 +305,16 @@ def _emit_element(
     if norm == "Diode":
         return f"d {x1} {y1} {x2} {y2} 0 default"
     if norm == "Push Button":
-        # Switch fields: position (0=open, 1=closed), momentary (0/1).
-        # Momentary buttons spring open when released — exactly what a
-        # tactile pushbutton does on a board.
-        return f"s {x1} {y1} {x2} {y2} 0 0 1"
+        # Falstad's switch element fields are `position momentary`, where
+        # position=0 means CLOSED (current flows through it as if it
+        # were a wire) and position=1 means OPEN. This is backwards from
+        # what most people would guess, and from what circuitjs1's UI
+        # implies — the source of truth is SwitchElm.java's getInfo():
+        #     position == 0 ? "closed" : "open"
+        # We default to OPEN so the LED is dark at rest; click-and-hold
+        # the button (momentary=1) to close it and watch the LED light
+        # up — which is what a real tactile pushbutton does.
+        return f"s {x1} {y1} {x2} {y2} 0 1 1"
     return f"w {x1} {y1} {x2} {y2} 0"  # safe fallback: a wire
 
 
@@ -428,11 +434,17 @@ def simulation_summary(design: CircuitDesign) -> dict:
     ]
     voltage = _supply_voltage(design)
     ok, reason = is_simulatable(design)
+    has_button = any(
+        normalize_component_type(c.type) == "Push Button" for c in sim_comps
+    )
     return {
         "supply_voltage": voltage,
         "simulatable_count": len(sim_comps),
         "skipped_refs": skipped,
         "total_components": len(design.components),
+        # Tell the UI the user can interact with the simulation so it can
+        # surface a "click + hold the button to power the circuit" hint.
+        "has_interactive_button": has_button,
         "ok": ok,
         "reason": reason,
     }

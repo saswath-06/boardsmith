@@ -70,6 +70,9 @@ export interface SchematicData {
     simulatable_count?: number;
     total_components?: number;
     skipped_refs?: string[];
+    /** True when the design has at least one push button — surfaced as a
+     *  "click + hold the button" hint on the Simulate action row. */
+    has_interactive_button?: boolean;
     ok?: boolean;
     reason?: string | null;
     error?: string;

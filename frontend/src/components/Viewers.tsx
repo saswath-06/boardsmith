@@ -856,12 +856,18 @@ const ViewerTabs = ({
               target="_blank"
               rel="noreferrer"
               className="bs-btn-primary px-4 py-2 rounded text-[13px] flex items-center gap-2 no-underline"
-              title="Open the circuit running live in Falstad — animated current flow, LEDs light up by current"
+              title={
+                schematic.simulate_summary?.has_interactive_button
+                  ? "Open the circuit in Falstad — click and hold the push button to complete the circuit and watch the LED light up"
+                  : "Open the circuit running live in Falstad — animated current flow, LEDs light up by current"
+              }
             >
               <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
                 <path d="M5 3l8 5-8 5V3z" fill="currentColor"/>
               </svg>
-              Simulate
+              {schematic.simulate_summary?.has_interactive_button
+                ? "Simulate · click button"
+                : "Simulate"}
             </a>
           )}
         </div>
