@@ -12,7 +12,7 @@ import re
 from pathlib import Path
 
 from app.component_library import COMPONENT_LIBRARY, normalize_component_type
-from app.lcsc import lookup_lcsc
+from app.lcsc import lookup_lcsc, lookup_unit_price_usd
 from app.models import BomData, BomLine, CircuitDesign
 
 
@@ -97,6 +97,12 @@ def build_bom(design: CircuitDesign) -> BomData:
         raw_value = raw_values.get(key)
         package = _package_for(comp_type)
         lcsc = lookup_lcsc(comp_type, raw_value, package)
+        unit_price = lookup_unit_price_usd(
+            comp_type, lcsc.lcsc_part_number if lcsc else None
+        )
+        ext_price = (
+            round(unit_price * len(refs), 4) if unit_price is not None else None
+        )
         lines.append(
             BomLine(
                 line_id=idx,
@@ -111,15 +117,23 @@ def build_bom(design: CircuitDesign) -> BomData:
                 lcsc_part_number=lcsc.lcsc_part_number if lcsc else None,
                 manufacturer_pn=lcsc.manufacturer_pn if lcsc else None,
                 manufacturer=lcsc.manufacturer if lcsc else None,
+                unit_price_usd=unit_price,
+                extended_price_usd=ext_price,
             )
         )
 
     total_quantity = sum(line.quantity for line in lines)
+    priced = [ln for ln in lines if ln.extended_price_usd is not None]
+    total_unit_cost = round(sum(ln.extended_price_usd or 0.0 for ln in priced), 2)
+
     return BomData(
         project_name=design.project_name,
         lines=lines,
         total_unique=len(lines),
         total_quantity=total_quantity,
+        total_unit_cost_usd=total_unit_cost,
+        priced_line_count=len(priced),
+        currency="USD",
     )
 
 
@@ -151,6 +165,8 @@ def write_bom_csv(bom: BomData, path: Path) -> Path:
                 "LCSC #",
                 "MFR P/N",
                 "Manufacturer",
+                "Unit Price (USD)",
+                "Extended Price (USD)",
                 "Notes",
             ]
         )
@@ -167,9 +183,30 @@ def write_bom_csv(bom: BomData, path: Path) -> Path:
                     line.lcsc_part_number or "",
                     line.manufacturer_pn or "",
                     line.manufacturer or "",
+                    f"{line.unit_price_usd:.4f}" if line.unit_price_usd is not None else "",
+                    f"{line.extended_price_usd:.4f}" if line.extended_price_usd is not None else "",
                     line.notes or "",
                 ]
             )
+        # Footer total — blank line then a TOTAL row.
+        writer.writerow([])
+        writer.writerow(
+            [
+                "",
+                "",
+                bom.total_quantity,
+                "",
+                "",
+                f"TOTAL ({bom.priced_line_count}/{bom.total_unique} lines priced)",
+                "",
+                "",
+                "",
+                "",
+                "",
+                f"{bom.total_unit_cost_usd:.2f}",
+                "",
+            ]
+        )
     return path
 
 

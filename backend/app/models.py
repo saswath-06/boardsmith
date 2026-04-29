@@ -87,6 +87,9 @@ class BomLine(BaseModel):
     lcsc_part_number: str | None = None
     manufacturer_pn: str | None = None
     manufacturer: str | None = None
+    # USD pricing (best-effort hand-curated; null when no match).
+    unit_price_usd: float | None = None
+    extended_price_usd: float | None = None
 
 
 class BomData(BaseModel):
@@ -94,6 +97,10 @@ class BomData(BaseModel):
     lines: list[BomLine]
     total_unique: int
     total_quantity: int
+    # Build cost rollup (sum of extended_price_usd over all priced lines).
+    total_unit_cost_usd: float = 0.0
+    priced_line_count: int = 0
+    currency: str = "USD"
     artifacts: dict[str, str] = Field(default_factory=dict)
 
 

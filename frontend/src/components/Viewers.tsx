@@ -145,6 +145,10 @@ export const BomViewer = ({ bom }: BomViewerProps) => {
   const matchPct = bom.total_unique
     ? Math.round((matched / bom.total_unique) * 100)
     : 0;
+  const totalCost =
+    typeof bom.total_unit_cost_usd === "number" && bom.total_unit_cost_usd > 0
+      ? bom.total_unit_cost_usd
+      : null;
 
   return (
     <div className="h-full w-full overflow-auto bs-scroll" style={{ background: "var(--bs-bg)" }}>
@@ -156,7 +160,7 @@ export const BomViewer = ({ bom }: BomViewerProps) => {
           borderColor: "var(--bs-line-soft)",
         }}
       >
-        <div className="flex items-center gap-3 font-mono text-[11px]">
+        <div className="flex items-center gap-3 font-mono text-[11px] flex-wrap">
           <span style={{ color: "var(--bs-fg-dim)" }}>UNIQUE</span>
           <span className="text-[15px] font-semibold" style={{ color: "var(--bs-fg)" }}>
             {bom.total_unique}
@@ -169,9 +173,28 @@ export const BomViewer = ({ bom }: BomViewerProps) => {
           {matched > 0 && (
             <>
               <span style={{ color: "var(--bs-line)" }}>·</span>
-              <span style={{ color: "var(--bs-fg-dim)" }}>LCSC MATCHED</span>
+              <span style={{ color: "var(--bs-fg-dim)" }}>LCSC</span>
               <span className="text-[15px] font-semibold" style={{ color: "var(--bs-lime)" }}>
                 {matched}/{bom.total_unique}
+              </span>
+            </>
+          )}
+          {totalCost !== null && (
+            <>
+              <span style={{ color: "var(--bs-line)" }}>·</span>
+              <span style={{ color: "var(--bs-fg-dim)" }}>UNIT COST</span>
+              <span
+                className="text-[15px] font-semibold"
+                style={{ color: "var(--bs-copper)" }}
+                title={`${bom.priced_line_count ?? 0}/${bom.total_unique} lines priced`}
+              >
+                ${totalCost.toFixed(2)}
+              </span>
+              <span
+                className="font-mono text-[10px] uppercase tracking-widest"
+                style={{ color: "var(--bs-fg-dim)" }}
+              >
+                10× ${(totalCost * 10).toFixed(2)} · 100× ${(totalCost * 100).toFixed(2)}
               </span>
             </>
           )}
@@ -218,9 +241,9 @@ export const BomViewer = ({ bom }: BomViewerProps) => {
               style={{ color: "var(--bs-fg-mute)" }}
             >
               <li>
-                Download the Gerber zip and the{" "}
-                <span style={{ color: "var(--bs-copper)" }}>JLCPCB BOM CSV</span>{" "}
-                from the bars below.
+                Download the{" "}
+                <span style={{ color: "var(--bs-copper)" }}>manufacturing bundle</span>{" "}
+                from the bottom bar — one zip with Gerbers, BOM, JLCPCB BOM, and CPL.
               </li>
               <li>
                 Open{" "}
@@ -233,11 +256,11 @@ export const BomViewer = ({ bom }: BomViewerProps) => {
                 >
                   cart.jlcpcb.com/quote
                 </a>{" "}
-                and upload the Gerber zip.
+                and upload the zip — the Gerber files inside are auto-detected.
               </li>
               <li>
-                Enable <span style={{ color: "var(--bs-copper)" }}>SMT Assembly</span>{" "}
-                and upload the BOM CSV plus a CPL (centroid) file.
+                Enable <span style={{ color: "var(--bs-copper)" }}>SMT Assembly</span>;
+                upload the JLCPCB BOM CSV and CPL CSV from the same zip.
               </li>
               <li>
                 Confirm pricing and place the order. Boards typically ship in 5–7 days.
@@ -263,8 +286,10 @@ export const BomViewer = ({ bom }: BomViewerProps) => {
             <th className="text-right px-3 py-2 w-12">Qty</th>
             <th className="text-left px-3 py-2 w-20">Value</th>
             <th className="text-left px-3 py-2">Description</th>
-            <th className="text-left px-3 py-2 w-44">Package</th>
-            <th className="text-left px-3 py-2 w-28">LCSC #</th>
+            <th className="text-left px-3 py-2 w-36">Package</th>
+            <th className="text-left px-3 py-2 w-24">LCSC #</th>
+            <th className="text-right px-3 py-2 w-20">Unit $</th>
+            <th className="text-right px-3 py-2 w-20">Ext $</th>
           </tr>
         </thead>
         <tbody>
@@ -334,9 +359,47 @@ export const BomViewer = ({ bom }: BomViewerProps) => {
                     <span style={{ color: "var(--bs-fg-dim)" }}>—</span>
                   )}
                 </td>
+                <td
+                  className="px-3 py-2 text-right font-mono text-[11px]"
+                  style={{ color: "var(--bs-fg-mute)" }}
+                >
+                  {typeof line.unit_price_usd === "number"
+                    ? `$${line.unit_price_usd.toFixed(4)}`
+                    : "—"}
+                </td>
+                <td
+                  className="px-3 py-2 text-right font-mono text-[11px]"
+                  style={{ color: "var(--bs-fg)" }}
+                >
+                  {typeof line.extended_price_usd === "number"
+                    ? `$${line.extended_price_usd.toFixed(2)}`
+                    : "—"}
+                </td>
               </tr>
             );
           })}
+          {totalCost !== null && (
+            <tr
+              style={{
+                background: "var(--bs-panel-2)",
+                borderTop: "2px solid var(--bs-line)",
+                color: "var(--bs-fg)",
+              }}
+            >
+              <td colSpan={6} className="px-3 py-2 text-right font-mono text-[11px] uppercase tracking-wider"
+                style={{ color: "var(--bs-fg-dim)" }}>
+                Total ({bom.priced_line_count}/{bom.total_unique} lines priced)
+              </td>
+              <td colSpan={2} className="px-3 py-2 text-right font-mono text-[12px] font-semibold"
+                style={{ color: "var(--bs-copper)" }}>
+                Unit cost
+              </td>
+              <td className="px-3 py-2 text-right font-mono text-[13px] font-semibold"
+                style={{ color: "var(--bs-copper)" }}>
+                ${totalCost.toFixed(2)}
+              </td>
+            </tr>
+          )}
         </tbody>
       </table>
     </div>
@@ -414,6 +477,8 @@ const ViewerTabs = ({ data, schematic, gerber, bom, jobId }: ViewerTabsProps) =>
   const bomCsvName = bom?.filenames?.bom_csv ?? "boardsmith_BOM.csv";
   const bomJlcpcbHref = bom?.artifacts?.bom_jlcpcb_csv ? artifactUrl(bom.artifacts.bom_jlcpcb_csv, token) : "";
   const bomJlcpcbName = bom?.filenames?.bom_jlcpcb_csv ?? "boardsmith_BOM_JLCPCB.csv";
+  const cplHref = gerber?.cpl_url ? artifactUrl(gerber.cpl_url, token) : "";
+  const bundleIncludes = gerber?.bundle_includes ?? [];
   return (
     <section className="bs-panel flex flex-col h-full overflow-hidden">
       {/* tab bar */}
@@ -522,7 +587,7 @@ const ViewerTabs = ({ data, schematic, gerber, bom, jobId }: ViewerTabsProps) =>
             <a
               href={bomJlcpcbHref}
               download={bomJlcpcbName}
-              className="bs-btn-primary px-4 py-2 rounded text-[13px] flex items-center gap-2 no-underline"
+              className="bs-btn-ghost px-3 py-2 rounded text-[12px] flex items-center gap-2 no-underline"
               title="Upload this CSV to JLCPCB when ordering SMT assembly"
             >
               <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
@@ -537,31 +602,53 @@ const ViewerTabs = ({ data, schematic, gerber, bom, jobId }: ViewerTabsProps) =>
               JLCPCB BOM
             </a>
           )}
+          {cplHref && (
+            <a
+              href={cplHref}
+              download={`${bom.project_name}_CPL.csv`}
+              className="bs-btn-ghost px-3 py-2 rounded text-[12px] flex items-center gap-2 no-underline"
+              title="Pick-and-place file for SMT assembly"
+            >
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+                <path
+                  d="M8 2v8m0 0l-3-3m3 3l3-3M3 13h10"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              CPL
+            </a>
+          )}
         </div>
       )}
 
-      {/* gerber download bar */}
+      {/* manufacturing bundle download bar — Gerbers + BOMs + CPL all-in-one */}
       {gerber && gerber.download_url && (
         <div className="flex items-center gap-3 px-4 py-2.5 border-t"
           style={{ borderColor: "var(--bs-line-soft)", background: "var(--bs-panel-2)" }}>
           <span className="bs-pill" style={{ color: "var(--bs-lime)" }}>
             <span className="h-1.5 w-1.5 rounded-full" style={{ background: "var(--bs-lime)" }}/>
-            Ready
+            JLCPCB-Ready
           </span>
           <div className="flex-1 min-w-0">
             <div className="text-[13px] font-medium truncate" style={{ color: "var(--bs-fg)" }}>
-              Gerber package · {filename}
+              Manufacturing bundle · {filename}
             </div>
-            <div className="font-mono text-[10px]" style={{ color: "var(--bs-fg-dim)" }}>
-              F.Cu · B.Cu · F.Mask · B.Mask · F.SilkS · Edge.Cuts · .drl
+            <div className="font-mono text-[10px] truncate" style={{ color: "var(--bs-fg-dim)" }}>
+              {bundleIncludes.length > 0
+                ? `Gerbers · drill · ${bundleIncludes.join(" · ")}`
+                : "Gerbers · drill · BOM · JLCPCB BOM · CPL"}
             </div>
           </div>
           <a href={downloadHref} download={filename}
-            className="bs-btn-primary px-4 py-2 rounded text-[13px] flex items-center gap-2 no-underline">
+            className="bs-btn-primary px-4 py-2 rounded text-[13px] flex items-center gap-2 no-underline"
+            title="One zip with everything JLCPCB needs: Gerbers, drills, BOM, JLCPCB BOM, and CPL pick-and-place">
             <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
               <path d="M8 2v8m0 0l-3-3m3 3l3-3M3 13h10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
-            Download
+            Download bundle
           </a>
         </div>
       )}

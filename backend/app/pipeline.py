@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from app.bom import build_bom, write_bom_csv, write_jlcpcb_csv
+from app.cpl import write_cpl_csv
 from app.gerber import write_gerber_zip
 from app.kicad_writer import write_kicad_schematic
 from app.llm import (
@@ -138,6 +139,10 @@ async def _run_downstream(job: JobRecord, design: CircuitDesign) -> None:
         lambda exc: {"svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><text x=\"20\" y=\"30\">Schematic fallback</text></svg>", "error": str(exc)},
     )
 
+    # Track BOM/CPL output paths so the gerber stage can fold them into the
+    # downloadable manufacturing bundle.
+    bundle_files: dict[str, Path] = {}
+
     async def bom_action() -> dict[str, Any]:
         bom = build_bom(design)
         bom_json_path = job.output_dir / "bom.json"
@@ -151,6 +156,8 @@ async def _run_downstream(job: JobRecord, design: CircuitDesign) -> None:
         STORE.add_artifact(job.job_id, "bom_json", bom_json_path)
         STORE.add_artifact(job.job_id, "bom_csv", bom_csv_path)
         STORE.add_artifact(job.job_id, "bom_jlcpcb_csv", bom_jlc_path)
+        bundle_files[bom_csv_path.name] = bom_csv_path
+        bundle_files[bom_jlc_path.name] = bom_jlc_path
         bom_payload = bom.model_dump(mode="json")
         bom_payload["artifacts"] = {
             "bom_csv": f"/api/jobs/{job.job_id}/artifact/bom_csv",
@@ -205,6 +212,17 @@ async def _run_downstream(job: JobRecord, design: CircuitDesign) -> None:
     pcb_svg_path.write_text(layout_svg(layout), encoding="utf-8")
     STORE.add_artifact(job.job_id, "pcb_svg", pcb_svg_path)
 
+    # CPL (pick-and-place). Written here because it depends on the routed
+    # layout's component coordinates. Surfaced as its own download AND
+    # folded into the manufacturing bundle below.
+    try:
+        cpl_path = job.output_dir / f"{project_name}_CPL.csv"
+        write_cpl_csv(layout, cpl_path)
+        STORE.add_artifact(job.job_id, "cpl_csv", cpl_path)
+        bundle_files[cpl_path.name] = cpl_path
+    except Exception as exc:  # noqa: BLE001
+        await _emit(job.job_id, "routing", StageStatus.error, f"CPL CSV failed: {exc}", None)
+
     await _safe_stage(
         job,
         "3d",
@@ -222,15 +240,24 @@ async def _run_downstream(job: JobRecord, design: CircuitDesign) -> None:
     )
 
     async def gerber_action() -> dict[str, Any]:
-        zip_path = write_gerber_zip(layout, job.output_dir, project_name)
+        zip_path = write_gerber_zip(
+            layout, job.output_dir, project_name, extra_files=bundle_files
+        )
         STORE.add_artifact(job.job_id, "gerbers", zip_path)
-        return {"download_url": f"/api/jobs/{job.job_id}/artifact/gerbers", "filename": zip_path.name}
+        return {
+            "download_url": f"/api/jobs/{job.job_id}/artifact/gerbers",
+            "filename": zip_path.name,
+            "bundle_includes": sorted(bundle_files.keys()),
+            "cpl_url": f"/api/jobs/{job.job_id}/artifact/cpl_csv"
+            if "cpl_csv" in (STORE.get(job.job_id).artifacts if STORE.get(job.job_id) else {})
+            else None,
+        }
 
     await _safe_stage(
         job,
         "gerber",
-        "Exporting demo Gerber package.",
-        "Gerber ZIP exported.",
+        "Bundling Gerbers + BOM + CPL into a JLCPCB-ready manufacturing zip.",
+        "Manufacturing bundle exported (Gerber + BOMs + CPL).",
         gerber_action,
         lambda exc: {"error": str(exc), "download_url": None},
     )

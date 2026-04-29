@@ -67,6 +67,8 @@ export interface SchematicData {
 export interface GerberData {
   download_url: string | null;
   filename?: string;
+  bundle_includes?: string[];
+  cpl_url?: string | null;
 }
 
 export interface BomLine {
@@ -82,6 +84,8 @@ export interface BomLine {
   lcsc_part_number?: string | null;
   manufacturer_pn?: string | null;
   manufacturer?: string | null;
+  unit_price_usd?: number | null;
+  extended_price_usd?: number | null;
 }
 
 export interface BomData {
@@ -89,6 +93,9 @@ export interface BomData {
   lines: BomLine[];
   total_unique: number;
   total_quantity: number;
+  total_unit_cost_usd?: number;
+  priced_line_count?: number;
+  currency?: string;
   artifacts?: {
     bom_csv?: string;
     bom_jlcpcb_csv?: string;

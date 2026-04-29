@@ -209,3 +209,47 @@ def lookup_lcsc(
     if "" in table:
         return table[""]
     return None
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Pricing — hand-curated USD unit prices at LCSC for ~Qty 10 (snapshotted).
+# Real prices fluctuate; treat these as order-of-magnitude estimates for
+# build cost rollups in the BOM. Override per-LCSC# only when a specific
+# part deviates significantly from its category default.
+# ─────────────────────────────────────────────────────────────────────────
+
+_TYPE_DEFAULT_PRICE_USD: dict[str, float] = {
+    "Resistor":     0.01,
+    "Capacitor":    0.02,
+    "Inductor":     0.10,
+    "LED":          0.05,
+    "Diode":        0.04,
+    "Push Button":  0.10,
+    "AMS1117":      0.30,
+    "USB-C Input":  0.32,
+    "ESP32":        4.50,
+    "Arduino Nano": 4.00,
+    "STM32F103":    1.80,
+    "DHT22":        2.50,
+    "MPU6050":      1.50,
+    "BMP280":       1.50,
+    "HC-SR04":      1.40,
+    "Pin Header":   0.05,
+    "JST-XH":       0.12,
+}
+
+# LCSC # → USD price overrides for parts that diverge from the type default.
+_PART_PRICE_OVERRIDES_USD: dict[str, float] = {
+    # ESP32 modules: WROOM-32E with 8MB flash trends a bit higher than bare.
+    "C701341": 4.80,
+}
+
+
+def lookup_unit_price_usd(
+    component_type: str,
+    lcsc_part_number: str | None = None,
+) -> float | None:
+    """Best-effort USD unit price for a part. Returns None when unknown."""
+    if lcsc_part_number and lcsc_part_number in _PART_PRICE_OVERRIDES_USD:
+        return _PART_PRICE_OVERRIDES_USD[lcsc_part_number]
+    return _TYPE_DEFAULT_PRICE_USD.get(component_type)

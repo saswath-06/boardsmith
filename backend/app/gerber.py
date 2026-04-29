@@ -30,7 +30,12 @@ def _gerber_header(layer: str) -> str:
     )
 
 
-def write_gerber_zip(layout: BoardLayout, output_dir: Path, project_name: str) -> Path:
+def write_gerber_zip(
+    layout: BoardLayout,
+    output_dir: Path,
+    project_name: str,
+    extra_files: dict[str, Path] | None = None,
+) -> Path:
     gerber_dir = output_dir / "gerbers"
     gerber_dir.mkdir(parents=True, exist_ok=True)
 
@@ -104,14 +109,27 @@ def write_gerber_zip(layout: BoardLayout, output_dir: Path, project_name: str) -
     (gerber_dir / f"{project_name}.drl").write_text("\n".join(drill_lines), encoding="utf-8")
 
     readme = (
-        "Boardsmith demo Gerber package.\n"
-        "These files are suitable for hackathon visualization and export flow demos. "
-        "Run real DRC/CAM review in KiCad before fabrication.\n"
+        "Boardsmith manufacturing bundle.\n"
+        "\n"
+        "Contents:\n"
+        "  *.gbr        — Gerber RS-274X copper / mask / silk / edge layers\n"
+        "  *.drl        — Excellon drill file\n"
+        "  *_BOM.csv    — Engineering bill of materials with prices\n"
+        "  *_BOM_JLCPCB.csv — JLCPCB SMT-assembly upload format\n"
+        "  *_CPL.csv    — Pick-and-place file (Designator, Mid X/Y, Layer, Rotation)\n"
+        "\n"
+        "Upload all three CSVs alongside the Gerber files when ordering SMT\n"
+        "assembly from JLCPCB. Run DRC/CAM review in KiCad before fabrication.\n"
     )
     (gerber_dir / "README.txt").write_text(readme, encoding="utf-8")
 
-    zip_path = output_dir / f"{project_name}_gerbers.zip"
+    zip_path = output_dir / f"{project_name}_manufacturing_bundle.zip"
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as archive:
         for path in sorted(gerber_dir.iterdir()):
             archive.write(path, arcname=path.name)
+        # Drop in BOMs / CPL alongside the Gerber layers so the downloaded
+        # bundle is everything a user needs to upload to JLCPCB.
+        for arcname, src in (extra_files or {}).items():
+            if src.exists():
+                archive.write(src, arcname=arcname)
     return zip_path
