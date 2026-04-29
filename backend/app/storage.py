@@ -386,6 +386,73 @@ class JobStore:
             for r in rows
         ]
 
+    async def delete_for_user(self, user_id: str, job_id: str) -> list[str]:
+        """Delete a job and all its descendant revisions.
+
+        Returns the list of job_ids that were actually deleted (parent +
+        every revision rooted at it). Raises ``KeyError`` when the job
+        doesn't exist for this user.
+
+        We cascade because keeping orphaned revisions around is confusing
+        — if you delete the original prompt, the refinement chain on top
+        of it has no anchor in the UI.
+        """
+        # Verify ownership before doing anything destructive.
+        owns_root = await fetch_one(
+            "SELECT 1 FROM jobs WHERE job_id = $1 AND user_id = $2",
+            job_id,
+            user_id,
+        )
+        if owns_root is None:
+            raise KeyError(f"job {job_id} not found for user")
+
+        # Gather every descendant id (BFS through parent_job_id pointers).
+        # The DB has ``ON DELETE SET NULL`` on parent_job_id, so a single
+        # DELETE on the root would orphan its children rather than remove
+        # them — we want full cascade, hence collecting + deleting all.
+        all_ids: list[str] = [job_id]
+        frontier: list[str] = [job_id]
+        while frontier:
+            child_rows = await fetch_all(
+                """
+                SELECT job_id FROM jobs
+                WHERE user_id = $1 AND parent_job_id = ANY($2::text[])
+                """,
+                user_id,
+                frontier,
+            )
+            frontier = [r["job_id"] for r in child_rows]
+            all_ids.extend(frontier)
+
+        # Drop in-memory cache entries first so any lingering streams
+        # don't try to write to a record that no longer exists.
+        for jid in all_ids:
+            self._jobs.pop(jid, None)
+
+        # Delete SQL rows. Children must go before parents because of the
+        # FK; reversing the BFS order achieves that (deepest revisions
+        # first, root last).
+        for jid in reversed(all_ids):
+            await execute(
+                "DELETE FROM jobs WHERE job_id = $1 AND user_id = $2",
+                jid,
+                user_id,
+            )
+
+        # Remove on-disk artifacts. Best-effort — we still want the SQL
+        # delete to succeed even if a file is locked.
+        import shutil
+
+        for jid in all_ids:
+            output_dir = GENERATED_ROOT / jid
+            if output_dir.exists():
+                try:
+                    shutil.rmtree(output_dir)
+                except Exception:  # noqa: BLE001
+                    pass
+
+        return all_ids
+
     async def owns(self, user_id: str, job_id: str) -> bool:
         """Used by SSE before opening the stream."""
         live = self._jobs.get(job_id)

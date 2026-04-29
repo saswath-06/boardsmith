@@ -12,6 +12,7 @@ import RefinePanel from "./components/RefinePanel";
 import ViewerTabs from "./components/Viewers";
 import {
   createJob,
+  deleteJob,
   getJob,
   getLineage,
   listJobs,
@@ -293,6 +294,10 @@ interface PipelineState {
   refine: (instruction: string) => Promise<void>;
   loadJob: (jobId: string) => Promise<void>;
   reset: () => void;
+  /** Clear the active job iff it (or one of its revisions) was deleted. */
+  clearActiveIfDeleted: (deletedIds: string[]) => void;
+  /** Force the jobs sidebar to re-fetch from the backend. */
+  bumpJobs: () => void;
 }
 
 // Pure function: rebuild viewer state from a snapshot's stored events.
@@ -528,6 +533,14 @@ function useRealPipeline(): PipelineState {
     };
   }, []);
 
+  const clearActiveIfDeleted = (deletedIds: string[]) => {
+    if (activeJobId && deletedIds.includes(activeJobId)) {
+      reset();
+    }
+  };
+
+  const bumpJobs = () => setJobsBump((n) => n + 1);
+
   return {
     running,
     jobId,
@@ -545,6 +558,8 @@ function useRealPipeline(): PipelineState {
     refine,
     loadJob,
     reset,
+    clearActiveIfDeleted,
+    bumpJobs,
   };
 }
 
@@ -592,6 +607,15 @@ const Dashboard = ({
           bump={pipeline.jobsBump}
           onSelect={(id) => void pipeline.loadJob(id)}
           onNew={onNew}
+          onDelete={async (id) => {
+            const deleted = await deleteJob(id);
+            // If the active project (or one of its revisions) was deleted,
+            // drop back to the welcome pane.
+            pipeline.clearActiveIfDeleted(deleted);
+            // Bump to re-fetch — keeps any other tabs / lineage state in sync.
+            pipeline.bumpJobs();
+            return deleted;
+          }}
         />
         {hasProject ? (
           <>

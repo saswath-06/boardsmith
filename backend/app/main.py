@@ -93,6 +93,20 @@ async def get_lineage(job_id: str, user: CurrentUser) -> list[LineageEntry]:
     return chain
 
 
+@app.delete("/api/jobs/{job_id}")
+async def delete_job(job_id: str, user: CurrentUser) -> dict[str, list[str]]:
+    """Delete a job and all its descendant revisions.
+
+    Returns ``{"deleted": [job_id, ...]}`` so the frontend knows which IDs
+    to drop from the sidebar (the cascade may include child revisions).
+    """
+    try:
+        deleted = await STORE.delete_for_user(user.user_id, job_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="job not found") from None
+    return {"deleted": deleted}
+
+
 @app.post("/api/jobs/{parent_id}/refine", response_model=JobCreateResponse)
 async def refine_job(
     parent_id: str, request: RefineRequest, user: CurrentUser

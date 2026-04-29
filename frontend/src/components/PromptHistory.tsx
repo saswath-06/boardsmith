@@ -10,6 +10,8 @@ interface PromptHistoryProps {
   bump: number;
   onSelect: (jobId: string) => void;
   onNew: () => void;
+  /** Returns the list of cascaded job_ids actually removed (parent + revisions). */
+  onDelete: (jobId: string) => Promise<string[]>;
 }
 
 interface Thread {
@@ -63,10 +65,12 @@ interface RowProps {
   job: JobSummary;
   active: boolean;
   isRevision: boolean;
+  deleting: boolean;
   onClick: () => void;
+  onDeleteClick: () => void;
 }
 
-const JobRow = ({ job, active, isRevision, onClick }: RowProps) => {
+const JobRow = ({ job, active, isRevision, deleting, onClick, onDeleteClick }: RowProps) => {
   const status: "running" | "complete" | "error" = job.complete ? "complete" : "running";
   const dot =
     status === "running" ? "var(--bs-cyan)" :
@@ -74,15 +78,9 @@ const JobRow = ({ job, active, isRevision, onClick }: RowProps) => {
   const title = isRevision && job.instruction ? job.instruction : job.description;
 
   return (
-    <button
-      onClick={onClick}
-      className="w-full text-left px-3 py-2 rounded transition-colors"
-      style={{
-        background: active ? "var(--bs-panel-2)" : "transparent",
-        borderLeft: active ? "2px solid var(--bs-copper)" : "2px solid transparent",
-        marginLeft: isRevision ? 12 : 0,
-        position: "relative",
-      }}
+    <div
+      className="group w-full relative"
+      style={{ marginLeft: isRevision ? 12 : 0 }}
     >
       {isRevision && (
         <span
@@ -98,44 +96,83 @@ const JobRow = ({ job, active, isRevision, onClick }: RowProps) => {
           }}
         />
       )}
-      <div className="flex items-center gap-2 mb-0.5">
-        <span
-          className="h-1.5 w-1.5 rounded-full shrink-0"
-          style={{
-            background: dot,
-            animation: status === "running" ? "bs-pulse 1.6s ease-in-out infinite" : "none",
-          }}
-        />
-        <span className="font-mono text-[10px]" style={{ color: "var(--bs-fg-dim)" }}>
-          {isRevision ? `r${job.revision}` : job.job_id.slice(0, 6)}
-        </span>
-        <span
-          className="font-mono text-[10px] ml-auto"
-          style={{ color: "var(--bs-fg-dim)" }}
-        >
-          {relTime(job.created_at)}
-        </span>
-      </div>
-      <div
-        className="text-[12.5px] leading-snug truncate"
-        style={{ color: active ? "var(--bs-fg)" : "var(--bs-fg-mute)" }}
-        title={title}
+      <button
+        onClick={onClick}
+        className="w-full text-left px-3 py-2 rounded transition-colors"
+        style={{
+          background: active ? "var(--bs-panel-2)" : "transparent",
+          borderLeft: active ? "2px solid var(--bs-copper)" : "2px solid transparent",
+          opacity: deleting ? 0.45 : 1,
+        }}
+        disabled={deleting}
       >
-        {title || "(empty)"}
-      </div>
-      {!isRevision && (job.components > 0 || job.nets > 0) && (
-        <div className="flex gap-3 mt-0.5 font-mono text-[10px]" style={{ color: "var(--bs-fg-dim)" }}>
-          <span>{job.components} comp</span>
-          <span>{job.nets} nets</span>
+        <div className="flex items-center gap-2 mb-0.5">
+          <span
+            className="h-1.5 w-1.5 rounded-full shrink-0"
+            style={{
+              background: dot,
+              animation: status === "running" ? "bs-pulse 1.6s ease-in-out infinite" : "none",
+            }}
+          />
+          <span className="font-mono text-[10px]" style={{ color: "var(--bs-fg-dim)" }}>
+            {isRevision ? `r${job.revision}` : job.job_id.slice(0, 6)}
+          </span>
+          <span
+            className="font-mono text-[10px] ml-auto"
+            style={{ color: "var(--bs-fg-dim)" }}
+          >
+            {relTime(job.created_at)}
+          </span>
         </div>
-      )}
-    </button>
+        <div
+          className="text-[12.5px] leading-snug truncate pr-6"
+          style={{ color: active ? "var(--bs-fg)" : "var(--bs-fg-mute)" }}
+          title={title}
+        >
+          {title || "(empty)"}
+        </div>
+        {!isRevision && (job.components > 0 || job.nets > 0) && (
+          <div className="flex gap-3 mt-0.5 font-mono text-[10px]" style={{ color: "var(--bs-fg-dim)" }}>
+            <span>{job.components} comp</span>
+            <span>{job.nets} nets</span>
+          </div>
+        )}
+      </button>
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          onDeleteClick();
+        }}
+        disabled={deleting}
+        aria-label={`Delete ${isRevision ? "revision" : "project"}`}
+        title={isRevision ? "Delete this revision" : "Delete project (and all revisions)"}
+        className="absolute top-1.5 right-1.5 h-5 w-5 rounded flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+        style={{
+          color: "var(--bs-fg-dim)",
+          background: "var(--bs-bg-2)",
+          border: "1px solid var(--bs-line-soft)",
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.color = "var(--bs-red)";
+          e.currentTarget.style.borderColor = "var(--bs-red)";
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.color = "var(--bs-fg-dim)";
+          e.currentTarget.style.borderColor = "var(--bs-line-soft)";
+        }}
+      >
+        <svg width="10" height="10" viewBox="0 0 12 12" fill="none" aria-hidden>
+          <path d="M2.5 2.5l7 7M9.5 2.5l-7 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+        </svg>
+      </button>
+    </div>
   );
 };
 
-const PromptHistory = ({ activeId, bump, onSelect, onNew }: PromptHistoryProps) => {
+const PromptHistory = ({ activeId, bump, onSelect, onNew, onDelete }: PromptHistoryProps) => {
   const [jobs, setJobs] = useState<JobSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     let cancelled = false;
@@ -153,6 +190,36 @@ const PromptHistory = ({ activeId, bump, onSelect, onNew }: PromptHistoryProps) 
       cancelled = true;
     };
   }, [bump]);
+
+  const handleDelete = async (job: JobSummary, isRoot: boolean) => {
+    const label = isRoot
+      ? "Delete this project and all its revisions?\n\nThis is permanent — Gerbers, BOM, and all generated artifacts will be removed."
+      : "Delete this revision?\n\nThis is permanent — its generated artifacts will be removed.";
+    if (!window.confirm(label)) return;
+
+    // Mark this job (and any descendants we know about locally) as deleting
+    // so the row dims and click is disabled while the request is in flight.
+    setDeletingIds((prev) => {
+      const next = new Set(prev);
+      next.add(job.job_id);
+      return next;
+    });
+
+    try {
+      const deletedIds = await onDelete(job.job_id);
+      // Optimistically drop deleted rows so the sidebar updates instantly
+      // without waiting for the parent's bump-driven refetch to land.
+      setJobs((prev) => prev.filter((j) => !deletedIds.includes(j.job_id)));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setDeletingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(job.job_id);
+        return next;
+      });
+    }
+  };
 
   const threads = buildThreads(jobs);
 
@@ -203,7 +270,9 @@ const PromptHistory = ({ activeId, bump, onSelect, onNew }: PromptHistoryProps) 
               job={root}
               active={root.job_id === activeId}
               isRevision={false}
+              deleting={deletingIds.has(root.job_id)}
               onClick={() => onSelect(root.job_id)}
+              onDeleteClick={() => void handleDelete(root, true)}
             />
             {children.map((child) => (
               <JobRow
@@ -211,7 +280,9 @@ const PromptHistory = ({ activeId, bump, onSelect, onNew }: PromptHistoryProps) 
                 job={child}
                 active={child.job_id === activeId}
                 isRevision
+                deleting={deletingIds.has(child.job_id)}
                 onClick={() => onSelect(child.job_id)}
+                onDeleteClick={() => void handleDelete(child, false)}
               />
             ))}
           </div>

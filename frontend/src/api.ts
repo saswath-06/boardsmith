@@ -66,6 +66,18 @@ export async function getLineage(jobId: string): Promise<LineageEntry[]> {
   return (await res.json()) as LineageEntry[];
 }
 
+export async function deleteJob(jobId: string): Promise<string[]> {
+  // Returns the list of job_ids that were actually deleted — the cascade
+  // includes any descendant revisions so the caller can drop them too.
+  const res = await authFetch(`/api/jobs/${jobId}`, { method: "DELETE" });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Failed to delete job: ${res.status} ${text}`);
+  }
+  const body = (await res.json()) as { deleted: string[] };
+  return body.deleted ?? [];
+}
+
 /** Open an SSE stream for a job. EventSource can't set headers, so we
  *  pass the Supabase JWT in a query param. The backend accepts either. */
 export async function subscribeToJob(
