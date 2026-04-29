@@ -1,6 +1,6 @@
 // Three viewers + tabs + EDA-tool footer.
 import { Fragment, useState } from "react";
-import type { Board3DData, GerberData, SchematicData } from "../types";
+import type { BomData, Board3DData, GerberData, SchematicData } from "../types";
 import { artifactUrl } from "../api";
 import Board3DViewer from "./Board3DViewer";
 
@@ -115,11 +115,239 @@ export const SchematicViewer = ({ svg }: SchematicViewerProps) => {
   );
 };
 
+// ── BOM viewer — bill-of-materials table.
+interface BomViewerProps {
+  bom: BomData | null;
+}
+
+const CATEGORY_BADGE: Record<string, string> = {
+  microcontroller: "var(--bs-cyan)",
+  sensor:          "var(--bs-lime)",
+  power:           "var(--bs-amber)",
+  discrete:        "var(--bs-red)",
+  passive:         "var(--bs-fg-dim)",
+  connector:       "var(--bs-copper)",
+};
+
+export const BomViewer = ({ bom }: BomViewerProps) => {
+  if (!bom) return <div className="bs-skeleton h-full w-full" />;
+  if (!bom.lines.length) {
+    return (
+      <div className="h-full w-full flex items-center justify-center font-mono text-[11px]"
+        style={{ color: "var(--bs-fg-dim)" }}>
+        No components in design.
+      </div>
+    );
+  }
+
+  const matched = bom.lines.filter((l) => l.lcsc_part_number).length;
+  const matchPct = bom.total_unique
+    ? Math.round((matched / bom.total_unique) * 100)
+    : 0;
+
+  return (
+    <div className="h-full w-full overflow-auto bs-scroll" style={{ background: "var(--bs-bg)" }}>
+      {/* totals banner */}
+      <div
+        className="sticky top-0 z-10 flex items-center gap-4 px-4 py-2 border-b"
+        style={{
+          background: "var(--bs-panel-2)",
+          borderColor: "var(--bs-line-soft)",
+        }}
+      >
+        <div className="flex items-center gap-3 font-mono text-[11px]">
+          <span style={{ color: "var(--bs-fg-dim)" }}>UNIQUE</span>
+          <span className="text-[15px] font-semibold" style={{ color: "var(--bs-fg)" }}>
+            {bom.total_unique}
+          </span>
+          <span style={{ color: "var(--bs-line)" }}>·</span>
+          <span style={{ color: "var(--bs-fg-dim)" }}>TOTAL PARTS</span>
+          <span className="text-[15px] font-semibold" style={{ color: "var(--bs-fg)" }}>
+            {bom.total_quantity}
+          </span>
+          {matched > 0 && (
+            <>
+              <span style={{ color: "var(--bs-line)" }}>·</span>
+              <span style={{ color: "var(--bs-fg-dim)" }}>LCSC MATCHED</span>
+              <span className="text-[15px] font-semibold" style={{ color: "var(--bs-lime)" }}>
+                {matched}/{bom.total_unique}
+              </span>
+            </>
+          )}
+        </div>
+        <span
+          className="ml-auto font-mono text-[10px] uppercase tracking-widest"
+          style={{ color: "var(--bs-fg-dim)" }}
+        >
+          {bom.project_name}
+        </span>
+      </div>
+
+      {/* JLCPCB call-to-action — only when we have at least one LCSC match */}
+      {matched > 0 && (
+        <div
+          className="mx-4 my-3 px-4 py-3 rounded flex items-start gap-3"
+          style={{
+            background: "var(--bs-panel)",
+            border: "1px solid var(--bs-copper)",
+          }}
+        >
+          <div
+            className="flex h-7 w-7 items-center justify-center rounded shrink-0 font-bold text-[11px] mt-0.5"
+            style={{ background: "var(--bs-copper)", color: "var(--bs-bg)" }}
+            aria-hidden
+          >
+            JL
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="text-[13px] font-semibold mb-1" style={{ color: "var(--bs-fg)" }}>
+              Ready to fab on JLCPCB
+              <span
+                className="ml-2 font-mono text-[10px] px-1.5 py-0.5 rounded"
+                style={{
+                  color: "var(--bs-lime)",
+                  border: "1px solid var(--bs-lime)",
+                }}
+              >
+                {matchPct}% PARTS MATCHED
+              </span>
+            </div>
+            <ol
+              className="font-mono text-[11px] leading-relaxed list-decimal pl-4 space-y-0.5"
+              style={{ color: "var(--bs-fg-mute)" }}
+            >
+              <li>
+                Download the Gerber zip and the{" "}
+                <span style={{ color: "var(--bs-copper)" }}>JLCPCB BOM CSV</span>{" "}
+                from the bars below.
+              </li>
+              <li>
+                Open{" "}
+                <a
+                  href="https://cart.jlcpcb.com/quote"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="hover:underline"
+                  style={{ color: "var(--bs-cyan)" }}
+                >
+                  cart.jlcpcb.com/quote
+                </a>{" "}
+                and upload the Gerber zip.
+              </li>
+              <li>
+                Enable <span style={{ color: "var(--bs-copper)" }}>SMT Assembly</span>{" "}
+                and upload the BOM CSV plus a CPL (centroid) file.
+              </li>
+              <li>
+                Confirm pricing and place the order. Boards typically ship in 5–7 days.
+              </li>
+            </ol>
+          </div>
+          <a
+            href="https://cart.jlcpcb.com/quote"
+            target="_blank"
+            rel="noreferrer"
+            className="bs-btn-primary px-3 py-2 rounded text-[12px] flex items-center gap-2 shrink-0 no-underline"
+          >
+            Open JLCPCB →
+          </a>
+        </div>
+      )}
+
+      <table className="w-full text-[12px]" style={{ borderCollapse: "collapse" }}>
+        <thead className="sticky z-[5]" style={{ top: 41, background: "var(--bs-bg-2)" }}>
+          <tr style={{ color: "var(--bs-fg-dim)" }} className="font-mono text-[10px] uppercase tracking-wider">
+            <th className="text-left px-3 py-2 w-10">#</th>
+            <th className="text-left px-3 py-2">References</th>
+            <th className="text-right px-3 py-2 w-12">Qty</th>
+            <th className="text-left px-3 py-2 w-20">Value</th>
+            <th className="text-left px-3 py-2">Description</th>
+            <th className="text-left px-3 py-2 w-44">Package</th>
+            <th className="text-left px-3 py-2 w-28">LCSC #</th>
+          </tr>
+        </thead>
+        <tbody>
+          {bom.lines.map((line, idx) => {
+            const badgeColor =
+              CATEGORY_BADGE[line.category] ?? "var(--bs-fg-dim)";
+            return (
+              <tr
+                key={line.line_id}
+                style={{
+                  background: idx % 2 === 0 ? "transparent" : "rgba(255,255,255,0.015)",
+                  borderTop: "1px solid var(--bs-line-soft)",
+                  color: "var(--bs-fg)",
+                }}
+              >
+                <td className="px-3 py-2 font-mono text-[11px]" style={{ color: "var(--bs-fg-dim)" }}>
+                  {line.line_id}
+                </td>
+                <td className="px-3 py-2 font-mono text-[11px]">
+                  {line.references.join(", ")}
+                </td>
+                <td className="px-3 py-2 text-right font-mono">
+                  <span
+                    className="px-1.5 py-0.5 rounded font-semibold"
+                    style={{
+                      background: "var(--bs-bg-2)",
+                      color: "var(--bs-fg)",
+                      border: "1px solid var(--bs-line-soft)",
+                    }}
+                  >
+                    {line.quantity}
+                  </span>
+                </td>
+                <td className="px-3 py-2 font-mono" style={{ color: "var(--bs-copper)" }}>
+                  {line.value || "—"}
+                </td>
+                <td className="px-3 py-2">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="h-1.5 w-1.5 rounded-full shrink-0"
+                      style={{ background: badgeColor }}
+                      title={line.category}
+                    />
+                    <span>{line.description}</span>
+                  </div>
+                </td>
+                <td
+                  className="px-3 py-2 font-mono text-[10.5px] truncate"
+                  style={{ color: "var(--bs-fg-mute)" }}
+                  title={line.package ?? ""}
+                >
+                  {line.package || "—"}
+                </td>
+                <td className="px-3 py-2 font-mono text-[11px]">
+                  {line.lcsc_part_number ? (
+                    <a
+                      href={`https://www.lcsc.com/product-detail/${line.lcsc_part_number}.html`}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{ color: "var(--bs-lime)" }}
+                      className="hover:underline"
+                      title={line.manufacturer_pn ?? undefined}
+                    >
+                      {line.lcsc_part_number}
+                    </a>
+                  ) : (
+                    <span style={{ color: "var(--bs-fg-dim)" }}>—</span>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+};
+
 // ── Tab strip
 const VIEWER_TABS = [
   { id: "3d",        label: "3D Board",   sub: "three.js · GL render" },
   { id: "pcb",       label: "PCB Layout", sub: "top view · F.Cu" },
   { id: "schematic", label: "Schematic",  sub: "schemdraw · SVG" },
+  { id: "bom",       label: "BOM",        sub: "parts list · LCSC" },
 ] as const;
 
 type TabId = typeof VIEWER_TABS[number]["id"];
@@ -168,16 +396,21 @@ interface ViewerTabsProps {
   data: Board3DData | null;
   schematic: SchematicData | null;
   gerber: GerberData | null;
+  bom: BomData | null;
   jobId: string | null;
 }
 
-const ViewerTabs = ({ data, schematic, gerber, jobId }: ViewerTabsProps) => {
+const ViewerTabs = ({ data, schematic, gerber, bom, jobId }: ViewerTabsProps) => {
   const [active, setActive] = useState<TabId>("3d");
   const kicadArtifact = schematic?.artifacts?.kicad_schematic;
   const kicadHref = kicadArtifact ? artifactUrl(kicadArtifact) : "";
   const kicadFilename = schematic?.kicad_filename ?? "boardsmith.kicad_sch";
   const downloadHref = gerber?.download_url ? artifactUrl(gerber.download_url) : "";
   const filename = gerber?.filename ?? "boardsmith.zip";
+  const bomCsvHref = bom?.artifacts?.bom_csv ? artifactUrl(bom.artifacts.bom_csv) : "";
+  const bomCsvName = bom?.filenames?.bom_csv ?? "boardsmith_BOM.csv";
+  const bomJlcpcbHref = bom?.artifacts?.bom_jlcpcb_csv ? artifactUrl(bom.artifacts.bom_jlcpcb_csv) : "";
+  const bomJlcpcbName = bom?.filenames?.bom_jlcpcb_csv ?? "boardsmith_BOM_JLCPCB.csv";
   return (
     <section className="bs-panel flex flex-col h-full overflow-hidden">
       {/* tab bar */}
@@ -213,6 +446,7 @@ const ViewerTabs = ({ data, schematic, gerber, jobId }: ViewerTabsProps) => {
         <div className={`absolute inset-0 ${active === "3d" ? "block" : "hidden"}`}><Board3DViewer data={data}/></div>
         <div className={`absolute inset-0 ${active === "pcb" ? "block" : "hidden"}`}><PcbLayoutViewer data={data}/></div>
         <div className={`absolute inset-0 ${active === "schematic" ? "block" : "hidden"}`}><SchematicViewer svg={schematic?.svg}/></div>
+        <div className={`absolute inset-0 ${active === "bom" ? "block" : "hidden"}`}><BomViewer bom={bom}/></div>
       </div>
 
       {/* footer */}
@@ -244,6 +478,65 @@ const ViewerTabs = ({ data, schematic, gerber, jobId }: ViewerTabsProps) => {
         </div>
       )}
 
+      {/* BOM download bar */}
+      {bom && bom.lines.length > 0 && bomCsvHref && (
+        <div
+          className="flex items-center gap-3 px-4 py-2.5 border-t"
+          style={{ borderColor: "var(--bs-line-soft)", background: "var(--bs-panel-2)" }}
+        >
+          <span className="bs-pill" style={{ color: "var(--bs-amber)" }}>
+            <span
+              className="h-1.5 w-1.5 rounded-full"
+              style={{ background: "var(--bs-amber)" }}
+            />
+            BOM
+          </span>
+          <div className="flex-1 min-w-0">
+            <div className="text-[13px] font-medium truncate" style={{ color: "var(--bs-fg)" }}>
+              Bill of Materials · {bom.total_unique} unique · {bom.total_quantity} parts
+            </div>
+            <div className="font-mono text-[10px]" style={{ color: "var(--bs-fg-dim)" }}>
+              engineering CSV · JLCPCB SMT-upload CSV
+            </div>
+          </div>
+          <a
+            href={bomCsvHref}
+            download={bomCsvName}
+            className="bs-btn-ghost px-3 py-2 rounded text-[12px] flex items-center gap-2 no-underline"
+          >
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+              <path
+                d="M8 2v8m0 0l-3-3m3 3l3-3M3 13h10"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+            BOM.csv
+          </a>
+          {bomJlcpcbHref && (
+            <a
+              href={bomJlcpcbHref}
+              download={bomJlcpcbName}
+              className="bs-btn-primary px-4 py-2 rounded text-[13px] flex items-center gap-2 no-underline"
+              title="Upload this CSV to JLCPCB when ordering SMT assembly"
+            >
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+                <path
+                  d="M8 2v8m0 0l-3-3m3 3l3-3M3 13h10"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              JLCPCB BOM
+            </a>
+          )}
+        </div>
+      )}
+
       {/* gerber download bar */}
       {gerber && gerber.download_url && (
         <div className="flex items-center gap-3 px-4 py-2.5 border-t"
@@ -267,9 +560,6 @@ const ViewerTabs = ({ data, schematic, gerber, jobId }: ViewerTabsProps) => {
             </svg>
             Download
           </a>
-          <button className="bs-btn-ghost px-3 py-2 rounded text-[12px]">
-            Send to JLCPCB →
-          </button>
         </div>
       )}
     </section>

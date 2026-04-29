@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
+from app.bom import build_bom, write_bom_csv, write_jlcpcb_csv
 from app.gerber import write_gerber_zip
 from app.kicad_writer import write_kicad_schematic
 from app.llm import (
@@ -12,7 +13,7 @@ from app.llm import (
     parse_circuit_description,
     refine_circuit_design,
 )
-from app.models import BoardLayout, CircuitDesign, PipelineEvent, StageStatus
+from app.models import BoardLayout, BomData, CircuitDesign, PipelineEvent, StageStatus
 from app.pcb_layout import generate_layout, layout_svg, route_layout
 from app.pin_aliases import normalize_design
 from app.schematic import write_schematic_svg
@@ -132,6 +133,45 @@ async def _run_downstream(job: JobRecord, design: CircuitDesign) -> None:
         "Schematic SVG and KiCad file generated.",
         schematic_action,
         lambda exc: {"svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><text x=\"20\" y=\"30\">Schematic fallback</text></svg>", "error": str(exc)},
+    )
+
+    async def bom_action() -> dict[str, Any]:
+        bom = build_bom(design)
+        bom_json_path = job.output_dir / "bom.json"
+        bom_csv_path = job.output_dir / f"{project_name}_BOM.csv"
+        bom_jlc_path = job.output_dir / f"{project_name}_BOM_JLCPCB.csv"
+        bom_json_path.write_text(
+            json.dumps(bom.model_dump(mode="json"), indent=2), encoding="utf-8"
+        )
+        write_bom_csv(bom, bom_csv_path)
+        write_jlcpcb_csv(bom, bom_jlc_path)
+        STORE.add_artifact(job.job_id, "bom_json", bom_json_path)
+        STORE.add_artifact(job.job_id, "bom_csv", bom_csv_path)
+        STORE.add_artifact(job.job_id, "bom_jlcpcb_csv", bom_jlc_path)
+        bom_payload = bom.model_dump(mode="json")
+        bom_payload["artifacts"] = {
+            "bom_csv": f"/api/jobs/{job.job_id}/artifact/bom_csv",
+            "bom_jlcpcb_csv": f"/api/jobs/{job.job_id}/artifact/bom_jlcpcb_csv",
+            "bom_json": f"/api/jobs/{job.job_id}/artifact/bom_json",
+        }
+        bom_payload["filenames"] = {
+            "bom_csv": bom_csv_path.name,
+            "bom_jlcpcb_csv": bom_jlc_path.name,
+        }
+        return bom_payload
+
+    await _safe_stage(
+        job,
+        "bom",
+        "Extracting bill of materials and exporting CSV.",
+        "BOM ready (engineering + JLCPCB CSV).",
+        bom_action,
+        lambda exc: {
+            "lines": [],
+            "total_unique": 0,
+            "total_quantity": 0,
+            "error": str(exc),
+        },
     )
 
     layout = await _safe_stage(

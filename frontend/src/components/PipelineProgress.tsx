@@ -4,8 +4,9 @@ import type { LogEntry, StageStatus } from "../types";
 type StageRowStatus = StageStatus | "waiting";
 
 const STAGES: Array<[string, string, string]> = [
-  ["parse",      "Parse intent",     "gemini-2.0-flash"],
-  ["schematic",  "Schematic",        "schemdraw + skidl"],
+  ["parse",      "Parse intent",     "gemini-2.5-pro"],
+  ["schematic",  "Schematic",        "SVG + KiCad .kicad_sch"],
+  ["bom",        "Bill of materials", "grouped parts · LCSC + JLCPCB CSV"],
   ["pcb_layout", "PCB layout",       "force-directed placement"],
   ["routing",    "Auto-route",       "lee · grid 0.25mm"],
   ["3d",         "3D visualization", "three.js"],

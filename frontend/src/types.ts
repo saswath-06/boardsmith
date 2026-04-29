@@ -69,6 +69,37 @@ export interface GerberData {
   filename?: string;
 }
 
+export interface BomLine {
+  line_id: number;
+  references: string[];
+  quantity: number;
+  type: string;
+  value?: string | null;
+  description: string;
+  package?: string | null;
+  category: string;
+  notes?: string | null;
+  lcsc_part_number?: string | null;
+  manufacturer_pn?: string | null;
+  manufacturer?: string | null;
+}
+
+export interface BomData {
+  project_name: string;
+  lines: BomLine[];
+  total_unique: number;
+  total_quantity: number;
+  artifacts?: {
+    bom_csv?: string;
+    bom_jlcpcb_csv?: string;
+    bom_json?: string;
+  };
+  filenames?: {
+    bom_csv?: string;
+    bom_jlcpcb_csv?: string;
+  };
+}
+
 // UI-side log line shape used inside PipelineProgress.
 export interface LogEntry {
   level: "info" | "ok" | "warn" | "err";

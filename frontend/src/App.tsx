@@ -11,6 +11,7 @@ import ViewerTabs from "./components/Viewers";
 import { createJob, getJob, getLineage, refineJob, subscribeToJob } from "./api";
 import type {
   Board3DData,
+  BomData,
   GerberData,
   JobSnapshot,
   LineageEntry,
@@ -230,6 +231,7 @@ interface PipelineState {
   data: Board3DData | null;
   schematic: SchematicData | null;
   gerber: GerberData | null;
+  bom: BomData | null;
   lineage: LineageEntry[];
   jobsBump: number;
   start: (description: string) => Promise<void>;
@@ -245,12 +247,14 @@ function projectSnapshot(snapshot: JobSnapshot): {
   data: Board3DData | null;
   schematic: SchematicData | null;
   gerber: GerberData | null;
+  bom: BomData | null;
 } {
   const stageStatus: Record<string, StageRowStatus> = {};
   const stageLogs: Record<string, LogEntry[]> = {};
   let data: Board3DData | null = null;
   let schematic: SchematicData | null = null;
   let gerber: GerberData | null = null;
+  let bom: BomData | null = null;
 
   for (const event of snapshot.events) {
     const stage = event.stage;
@@ -275,6 +279,9 @@ function projectSnapshot(snapshot: JobSnapshot): {
       if (stage === "gerber" && payload && typeof payload === "object" && "download_url" in payload) {
         gerber = payload as unknown as GerberData;
       }
+      if (stage === "bom" && payload && typeof payload === "object" && "lines" in payload) {
+        bom = payload as unknown as BomData;
+      }
       continue;
     }
     if (event.status === "error") {
@@ -282,7 +289,7 @@ function projectSnapshot(snapshot: JobSnapshot): {
     }
   }
 
-  return { stageStatus, stageLogs, data, schematic, gerber };
+  return { stageStatus, stageLogs, data, schematic, gerber, bom };
 }
 
 function useRealPipeline(): PipelineState {
@@ -295,6 +302,7 @@ function useRealPipeline(): PipelineState {
   const [data, setData] = useState<Board3DData | null>(null);
   const [schematic, setSchematic] = useState<SchematicData | null>(null);
   const [gerber, setGerber] = useState<GerberData | null>(null);
+  const [bom, setBom] = useState<BomData | null>(null);
   const [lineage, setLineage] = useState<LineageEntry[]>([]);
   const [jobsBump, setJobsBump] = useState(0);
 
@@ -315,6 +323,7 @@ function useRealPipeline(): PipelineState {
     setData(null);
     setSchematic(null);
     setGerber(null);
+    setBom(null);
   };
 
   const reset = () => {
@@ -375,6 +384,9 @@ function useRealPipeline(): PipelineState {
       }
       if (stage === "gerber" && payload && typeof payload === "object" && "download_url" in payload) {
         setGerber(payload as unknown as GerberData);
+      }
+      if (stage === "bom" && payload && typeof payload === "object" && "lines" in payload) {
+        setBom(payload as unknown as BomData);
       }
       return;
     }
@@ -437,6 +449,7 @@ function useRealPipeline(): PipelineState {
       setData(projected.data);
       setSchematic(projected.schematic);
       setGerber(projected.gerber);
+      setBom(projected.bom);
       void refreshLineage(id);
       // If this snapshot is still in progress, hop on its event stream.
       if (!snapshot.complete) {
@@ -470,6 +483,7 @@ function useRealPipeline(): PipelineState {
     data,
     schematic,
     gerber,
+    bom,
     lineage,
     jobsBump,
     start,
@@ -533,6 +547,7 @@ const ActiveDashboard = ({
               data={pipeline.data}
               schematic={pipeline.schematic}
               gerber={pipeline.gerber}
+              bom={pipeline.bom}
               jobId={pipeline.jobId}
             />
           </div>

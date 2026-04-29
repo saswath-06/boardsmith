@@ -71,6 +71,32 @@ class RefineRequest(BaseModel):
     instruction: str = Field(..., min_length=3)
 
 
+class BomLine(BaseModel):
+    """One row of the bill of materials — one or more identical parts."""
+
+    line_id: int
+    references: list[str]
+    quantity: int
+    type: str
+    value: str | None = None
+    description: str
+    package: str | None = None
+    category: str = ""
+    notes: str | None = None
+    # JLCPCB / LCSC enrichment (populated by app.lcsc when a match exists).
+    lcsc_part_number: str | None = None
+    manufacturer_pn: str | None = None
+    manufacturer: str | None = None
+
+
+class BomData(BaseModel):
+    project_name: str
+    lines: list[BomLine]
+    total_unique: int
+    total_quantity: int
+    artifacts: dict[str, str] = Field(default_factory=dict)
+
+
 class PinDefinition(BaseModel):
     name: str
     kind: str = "passive"
