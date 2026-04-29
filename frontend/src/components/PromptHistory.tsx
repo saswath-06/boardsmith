@@ -71,6 +71,7 @@ interface RowProps {
 }
 
 const JobRow = ({ job, active, isRevision, deleting, onClick, onDeleteClick }: RowProps) => {
+  const [hover, setHover] = useState(false);
   const status: "running" | "complete" | "error" = job.complete ? "complete" : "running";
   const dot =
     status === "running" ? "var(--bs-cyan)" :
@@ -79,8 +80,10 @@ const JobRow = ({ job, active, isRevision, deleting, onClick, onDeleteClick }: R
 
   return (
     <div
-      className="group w-full relative"
+      className="w-full relative"
       style={{ marginLeft: isRevision ? 12 : 0 }}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
     >
       {isRevision && (
         <span
@@ -146,11 +149,17 @@ const JobRow = ({ job, active, isRevision, deleting, onClick, onDeleteClick }: R
         disabled={deleting}
         aria-label={`Delete ${isRevision ? "revision" : "project"}`}
         title={isRevision ? "Delete this revision" : "Delete project (and all revisions)"}
-        className="absolute top-1.5 right-1.5 h-5 w-5 rounded flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+        className="absolute top-1.5 right-1.5 h-5 w-5 rounded flex items-center justify-center"
         style={{
           color: "var(--bs-fg-dim)",
           background: "var(--bs-bg-2)",
           border: "1px solid var(--bs-line-soft)",
+          // Inline opacity so this works regardless of Tailwind JIT picking
+          // up `opacity-0 group-hover:opacity-100`. Tailwind v4's scanner
+          // dropped those classes from the production CSS.
+          opacity: hover || deleting ? 1 : 0,
+          pointerEvents: hover ? "auto" : "none",
+          transition: "opacity 120ms ease, color 120ms ease, border-color 120ms ease",
         }}
         onMouseEnter={(e) => {
           e.currentTarget.style.color = "var(--bs-red)";
