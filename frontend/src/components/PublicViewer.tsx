@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { getPublicJob } from "../api";
 import BoardsmithLogo from "./Logo";
+import DesignNotes from "./DesignNotes";
 import ViewerTabs from "./Viewers";
 import type {
   Board3DData,
@@ -20,6 +21,7 @@ interface ProjectedSnapshot {
   schematic: SchematicData | null;
   gerber: GerberData | null;
   bom: BomData | null;
+  designNotes: string[];
 }
 
 function projectPublicSnapshot(snapshot: JobSnapshot): ProjectedSnapshot {
@@ -27,10 +29,17 @@ function projectPublicSnapshot(snapshot: JobSnapshot): ProjectedSnapshot {
   let schematic: SchematicData | null = null;
   let gerber: GerberData | null = null;
   let bom: BomData | null = null;
+  let designNotes: string[] = [];
 
   for (const event of snapshot.events) {
     if (event.status !== "complete") continue;
     const payload = event.data as Record<string, unknown> | null | undefined;
+    if (event.stage === "parse" && payload && typeof payload === "object" && "design_decisions" in payload) {
+      const notes = (payload as { design_decisions?: unknown }).design_decisions;
+      if (Array.isArray(notes)) {
+        designNotes = notes.filter((n): n is string => typeof n === "string");
+      }
+    }
     if (event.stage === "schematic" && payload && typeof payload === "object" && "svg" in payload) {
       schematic = payload as unknown as SchematicData;
     }
@@ -45,7 +54,7 @@ function projectPublicSnapshot(snapshot: JobSnapshot): ProjectedSnapshot {
     }
   }
 
-  return { data, schematic, gerber, bom };
+  return { data, schematic, gerber, bom, designNotes };
 }
 
 const PublicViewer = () => {
@@ -58,6 +67,7 @@ const PublicViewer = () => {
     schematic: null,
     gerber: null,
     bom: null,
+    designNotes: [],
   });
 
   useEffect(() => {
@@ -174,15 +184,18 @@ const PublicViewer = () => {
         </Link>
       </header>
 
-      <main className="flex-1 grid gap-2 p-2 min-h-0" style={{ gridTemplateColumns: "1fr" }}>
-        <ViewerTabs
-          data={projected.data}
-          schematic={projected.schematic}
-          gerber={projected.gerber}
-          bom={projected.bom}
-          jobId={snapshot.job_id}
-          readOnly
-        />
+      <main className="flex-1 flex flex-col gap-0 p-2 min-h-0">
+        <DesignNotes decisions={projected.designNotes} />
+        <div className="flex-1 min-h-0">
+          <ViewerTabs
+            data={projected.data}
+            schematic={projected.schematic}
+            gerber={projected.gerber}
+            bom={projected.bom}
+            jobId={snapshot.job_id}
+            readOnly
+          />
+        </div>
       </main>
     </div>
   );

@@ -5,6 +5,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Route, Routes } from "react-router-dom";
 import AuthGate from "./components/AuthGate";
+import DesignNotes from "./components/DesignNotes";
 import LineageBreadcrumb from "./components/LineageBreadcrumb";
 import BoardsmithLogo from "./components/Logo";
 import PipelineProgress from "./components/PipelineProgress";
@@ -347,6 +348,7 @@ interface PipelineState {
   schematic: SchematicData | null;
   gerber: GerberData | null;
   bom: BomData | null;
+  designNotes: string[];
   lineage: LineageEntry[];
   jobsBump: number;
   start: (description: string, image?: File | null) => Promise<void>;
@@ -367,6 +369,7 @@ function projectSnapshot(snapshot: JobSnapshot): {
   schematic: SchematicData | null;
   gerber: GerberData | null;
   bom: BomData | null;
+  designNotes: string[];
 } {
   const stageStatus: Record<string, StageRowStatus> = {};
   const stageLogs: Record<string, LogEntry[]> = {};
@@ -374,6 +377,7 @@ function projectSnapshot(snapshot: JobSnapshot): {
   let schematic: SchematicData | null = null;
   let gerber: GerberData | null = null;
   let bom: BomData | null = null;
+  let designNotes: string[] = [];
 
   for (const event of snapshot.events) {
     const stage = event.stage;
@@ -389,6 +393,12 @@ function projectSnapshot(snapshot: JobSnapshot): {
       (stageLogs[stage] ??= []).push({ level: "ok", msg: event.message });
 
       const payload = event.data as Record<string, unknown> | null | undefined;
+      if (stage === "parse" && payload && typeof payload === "object" && "design_decisions" in payload) {
+        const notes = (payload as { design_decisions?: unknown }).design_decisions;
+        if (Array.isArray(notes)) {
+          designNotes = notes.filter((n): n is string => typeof n === "string");
+        }
+      }
       if (stage === "schematic" && payload && typeof payload === "object" && "svg" in payload) {
         schematic = payload as unknown as SchematicData;
       }
@@ -408,7 +418,7 @@ function projectSnapshot(snapshot: JobSnapshot): {
     }
   }
 
-  return { stageStatus, stageLogs, data, schematic, gerber, bom };
+  return { stageStatus, stageLogs, data, schematic, gerber, bom, designNotes };
 }
 
 function useRealPipeline(): PipelineState {
@@ -422,6 +432,7 @@ function useRealPipeline(): PipelineState {
   const [schematic, setSchematic] = useState<SchematicData | null>(null);
   const [gerber, setGerber] = useState<GerberData | null>(null);
   const [bom, setBom] = useState<BomData | null>(null);
+  const [designNotes, setDesignNotes] = useState<string[]>([]);
   const [lineage, setLineage] = useState<LineageEntry[]>([]);
   const [jobsBump, setJobsBump] = useState(0);
 
@@ -443,6 +454,7 @@ function useRealPipeline(): PipelineState {
     setSchematic(null);
     setGerber(null);
     setBom(null);
+    setDesignNotes([]);
   };
 
   const reset = () => {
@@ -495,6 +507,12 @@ function useRealPipeline(): PipelineState {
       appendLog(stage, { level: "ok", msg: event.message });
 
       const payload = event.data as Record<string, unknown> | null | undefined;
+      if (stage === "parse" && payload && typeof payload === "object" && "design_decisions" in payload) {
+        const notes = (payload as { design_decisions?: unknown }).design_decisions;
+        if (Array.isArray(notes)) {
+          setDesignNotes(notes.filter((n): n is string => typeof n === "string"));
+        }
+      }
       if (stage === "schematic" && payload && typeof payload === "object" && "svg" in payload) {
         setSchematic(payload as unknown as SchematicData);
       }
@@ -569,6 +587,7 @@ function useRealPipeline(): PipelineState {
       setSchematic(projected.schematic);
       setGerber(projected.gerber);
       setBom(projected.bom);
+      setDesignNotes(projected.designNotes);
       void refreshLineage(id);
       // If this snapshot is still in progress, hop on its event stream.
       if (!snapshot.complete) {
@@ -611,6 +630,7 @@ function useRealPipeline(): PipelineState {
     schematic,
     gerber,
     bom,
+    designNotes,
     lineage,
     jobsBump,
     start,
@@ -694,6 +714,7 @@ const Dashboard = ({
                 activeJobId={pipeline.activeJobId}
                 onSelect={(id) => void pipeline.loadJob(id)}
               />
+              <DesignNotes decisions={pipeline.designNotes} />
               <div className="flex-1 min-h-0">
                 <ViewerTabs
                   data={pipeline.data}

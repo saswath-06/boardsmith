@@ -185,6 +185,10 @@ class CircuitDesign(BaseModel):
     components: list[ComponentInstance]
     nets: list[Net]
     warnings: list[str] = Field(default_factory=list)
+    # Human-readable bullet points explaining the design choices the LLM
+    # made — MCU pick, power chain, off-board breakouts, etc. Surfaced as
+    # its own "Design notes" panel in the UI, separate from warnings.
+    design_decisions: list[str] = Field(default_factory=list)
 
 
 class Pad(BaseModel):

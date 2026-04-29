@@ -60,8 +60,22 @@ Schema:
       ]
     }}
   ],
+  "design_decisions": [
+    "Short, plain-English bullet about a choice you made — one per bullet."
+  ],
   "warnings": ["unsupported request or assumption"]
 }}
+
+design_decisions vs warnings:
+- ``design_decisions`` is for explaining the choices you made on the user's
+  behalf — picked MCU, picked power chain, broke out unsupported parts to a
+  header, defaulted a value, etc. ALWAYS populate this for goal prompts and
+  for component prompts where you inferred extra parts (LED resistors,
+  decoupling caps, headers).
+- ``warnings`` is reserved for actual problems: unsupported parts the user
+  asked for, ambiguous requirements, things that might not match what the
+  user expected. Don't fill warnings with design rationale — that's what
+  design_decisions is for.
 
 General rules:
 - Use only the allowed component types. If the user asks for an unsupported
@@ -70,7 +84,7 @@ General rules:
 - Always include GND and any needed power nets.
 - Use realistic pin names from the selected parts.
 - Include current-limiting resistors for LEDs and pull-ups for one-wire
-  sensor data when useful.
+  sensor data when useful — and mention each addition in design_decisions.
 
 Rules for COMPONENT-LEVEL prompts:
 - PRESERVE EVERY QUANTITY the user specifies. "Eight LEDs" → eight separate
@@ -79,6 +93,8 @@ Rules for COMPONENT-LEVEL prompts:
 - Use distinct reference designators per part (R1, R2, R3, …) and wire each
   one individually in the nets list.
 - Do not omit components for brevity. There is no length limit on the output.
+- If you add support parts the user didn't explicitly request (LED resistors,
+  decoupling caps, pull-ups), list each addition in design_decisions.
 
 Rules for INTENT-LEVEL / GOAL prompts:
 - Default to a small, sensible system: ONE MCU, the cheapest sensors that
@@ -92,11 +108,13 @@ Rules for INTENT-LEVEL / GOAL prompts:
   solenoid, motor, motor driver, display, RTC, buzzer, SD card, RF module,
   etc.), DO NOT invent it. Emit a 4-pin Pin Header or JST-XH labeled with
   what plugs in (e.g. notes: "to external relay/solenoid driver"), wire the
-  MCU's control signal + power + ground to it, and add a warning explaining
-  what the user needs to attach off-board.
-- Always add a warning at the top of the warnings list summarizing the
-  design decisions you made (selected MCU, sensors, off-board parts) so the
-  user can see what was inferred.
+  MCU's control signal + power + ground to it, and document the breakout in
+  design_decisions.
+- Populate design_decisions with one bullet per major choice. Examples:
+    "Picked ESP32 for Wi-Fi-driven scheduling."
+    "Power chain: USB-C → AMS1117 3.3V regulator with 10uF in/out caps."
+    "Solenoid control broken out to JST-XH J2 — needs an external driver."
+    "Added one status LED on GPIO4 with a 330Ω limiter."
 - Keep the inferred design minimal — prefer 8–15 components over 30. The
   user can refine to add more.
 """
@@ -128,6 +146,9 @@ Schema (same as the original parser):
       ]
     }}
   ],
+  "design_decisions": [
+    "Bullet describing a choice you made for this refinement."
+  ],
   "warnings": ["unsupported request or assumption"]
 }}
 
@@ -145,6 +166,9 @@ Rules:
   user requests an unsupported one and add a warning.
 - PRESERVE EVERY QUANTITY — same rules as initial parsing. "add eight LEDs"
   means eight separate LED components with eight resistors and eight nets.
+- design_decisions: keep every bullet from the previous design that's still
+  accurate, and append new bullets describing what changed in THIS refinement
+  (parts added/removed, MCU swapped, breakout reassigned, etc.).
 - There is no length limit on the output.
 """
 

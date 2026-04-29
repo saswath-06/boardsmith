@@ -31,6 +31,8 @@ Every stage emits a Server-Sent Event so the UI fills in as each artifact lands.
 - **All-in JLCPCB cost breakdown.** A receipt-style breakdown on the BOM tab that uses JLCPCB's published pricing (parts + 5% scrap buffer, board fab tier, $8 SMT setup, $0.0017/joint placement, stencil, shipping) for 5 / 30 / 100-board tiers. Answers "how much for 5 boards assembled?" with a real number.
 - **Public share links.** Hit **Share** in the top bar to publish a read-only link at `/p/<job_id>` — no auth, no downloads, just the live 3D / PCB / schematic / BOM tabs. Great for portfolio links and Discord drops.
 - **Multimodal prompts.** The prompt box accepts a paperclip-attached image, a drag-and-dropped file, or a paste from clipboard. Gemini Vision extracts components and connections from the picture; optional accompanying text becomes additional guidance.
+- **Intent-level prompts.** Describe the *goal* (`"a PCB to control water dispense times"`, `"a smart doorbell"`) and Gemini designs a sensible minimal system — picks an MCU, breaks unsupported parts (relays, motors, displays) out to a header for an off-board driver, and explains every choice it made.
+- **Design notes panel.** Every project shows a dedicated "Design notes" card above the viewer tabs listing each design decision the LLM made (MCU choice, power chain, off-board breakouts). Separate from warnings so rationale never gets mixed with actual problems.
 - **Native KiCad 10 schematic export.** A real `.kicad_sch` with category-grouped column layout, IEC symbol shapes, and per-symbol `(instances …)` blocks so KiCad opens it as a project.
 
 ---

@@ -89,6 +89,14 @@ async def run_pipeline(job: JobRecord) -> None:
             lambda exc: fallback_design(job.description, str(exc)),
         )
         design = await _persist_design(job, design)
+        if design.design_decisions:
+            await _emit(
+                job.job_id,
+                "parse",
+                StageStatus.complete,
+                f"Design notes: {len(design.design_decisions)} decisions recorded.",
+                {"design_decisions": design.design_decisions},
+            )
         if design.warnings:
             await _emit(job.job_id, "parse", StageStatus.error, "Warning: parser used assumptions.", {"warnings": design.warnings})
         await _run_downstream(job, design)
@@ -113,6 +121,14 @@ async def run_refinement_pipeline(job: JobRecord, parent_design: CircuitDesign) 
             }),
         )
         design = await _persist_design(job, design)
+        if design.design_decisions:
+            await _emit(
+                job.job_id,
+                "parse",
+                StageStatus.complete,
+                f"Design notes: {len(design.design_decisions)} decisions recorded.",
+                {"design_decisions": design.design_decisions},
+            )
         if design.warnings:
             await _emit(job.job_id, "parse", StageStatus.error, "Warning: refinement used assumptions.", {"warnings": design.warnings})
         await _run_downstream(job, design)
