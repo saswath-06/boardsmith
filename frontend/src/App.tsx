@@ -28,6 +28,7 @@ import { AuthProvider, useAuth } from "./lib/auth";
 import type {
   Board3DData,
   BomData,
+  FirmwareData,
   GerberData,
   JobSnapshot,
   LineageEntry,
@@ -348,6 +349,7 @@ interface PipelineState {
   schematic: SchematicData | null;
   gerber: GerberData | null;
   bom: BomData | null;
+  firmware: FirmwareData | null;
   designNotes: string[];
   lineage: LineageEntry[];
   jobsBump: number;
@@ -369,6 +371,7 @@ function projectSnapshot(snapshot: JobSnapshot): {
   schematic: SchematicData | null;
   gerber: GerberData | null;
   bom: BomData | null;
+  firmware: FirmwareData | null;
   designNotes: string[];
 } {
   const stageStatus: Record<string, StageRowStatus> = {};
@@ -377,6 +380,7 @@ function projectSnapshot(snapshot: JobSnapshot): {
   let schematic: SchematicData | null = null;
   let gerber: GerberData | null = null;
   let bom: BomData | null = null;
+  let firmware: FirmwareData | null = null;
   let designNotes: string[] = [];
 
   for (const event of snapshot.events) {
@@ -411,6 +415,9 @@ function projectSnapshot(snapshot: JobSnapshot): {
       if (stage === "bom" && payload && typeof payload === "object" && "lines" in payload) {
         bom = payload as unknown as BomData;
       }
+      if (stage === "firmware" && payload && typeof payload === "object" && "code" in payload) {
+        firmware = payload as unknown as FirmwareData;
+      }
       continue;
     }
     if (event.status === "error") {
@@ -418,7 +425,7 @@ function projectSnapshot(snapshot: JobSnapshot): {
     }
   }
 
-  return { stageStatus, stageLogs, data, schematic, gerber, bom, designNotes };
+  return { stageStatus, stageLogs, data, schematic, gerber, bom, firmware, designNotes };
 }
 
 function useRealPipeline(): PipelineState {
@@ -432,6 +439,7 @@ function useRealPipeline(): PipelineState {
   const [schematic, setSchematic] = useState<SchematicData | null>(null);
   const [gerber, setGerber] = useState<GerberData | null>(null);
   const [bom, setBom] = useState<BomData | null>(null);
+  const [firmware, setFirmware] = useState<FirmwareData | null>(null);
   const [designNotes, setDesignNotes] = useState<string[]>([]);
   const [lineage, setLineage] = useState<LineageEntry[]>([]);
   const [jobsBump, setJobsBump] = useState(0);
@@ -454,6 +462,7 @@ function useRealPipeline(): PipelineState {
     setSchematic(null);
     setGerber(null);
     setBom(null);
+    setFirmware(null);
     setDesignNotes([]);
   };
 
@@ -525,6 +534,9 @@ function useRealPipeline(): PipelineState {
       if (stage === "bom" && payload && typeof payload === "object" && "lines" in payload) {
         setBom(payload as unknown as BomData);
       }
+      if (stage === "firmware" && payload && typeof payload === "object" && "code" in payload) {
+        setFirmware(payload as unknown as FirmwareData);
+      }
       return;
     }
 
@@ -587,6 +599,7 @@ function useRealPipeline(): PipelineState {
       setSchematic(projected.schematic);
       setGerber(projected.gerber);
       setBom(projected.bom);
+      setFirmware(projected.firmware);
       setDesignNotes(projected.designNotes);
       void refreshLineage(id);
       // If this snapshot is still in progress, hop on its event stream.
@@ -630,6 +643,7 @@ function useRealPipeline(): PipelineState {
     schematic,
     gerber,
     bom,
+    firmware,
     designNotes,
     lineage,
     jobsBump,
@@ -642,16 +656,66 @@ function useRealPipeline(): PipelineState {
   };
 }
 
+// ── Collapsed rail — thin 32px column shown in place of an expanded
+// sidebar. Click to expand. Used for both Jobs and Pipeline.
+interface CollapsedRailProps {
+  label: string;
+  onExpand: () => void;
+}
+
+const CollapsedRail = ({ label, onExpand }: CollapsedRailProps) => (
+  <button
+    type="button"
+    onClick={onExpand}
+    className="bs-panel h-full flex flex-col items-center justify-between py-3 transition-colors"
+    style={{ width: 32, cursor: "pointer", color: "var(--bs-fg-mute)" }}
+    onMouseEnter={(e) => {
+      e.currentTarget.style.borderColor = "var(--bs-copper)";
+      e.currentTarget.style.color = "var(--bs-fg)";
+    }}
+    onMouseLeave={(e) => {
+      e.currentTarget.style.borderColor = "var(--bs-line)";
+      e.currentTarget.style.color = "var(--bs-fg-mute)";
+    }}
+    title={`Expand ${label.toLowerCase()} column`}
+    aria-label={`Expand ${label.toLowerCase()} column`}
+  >
+    <svg width="11" height="11" viewBox="0 0 12 12" fill="none" aria-hidden>
+      <path d="M4.5 2.5l3 3.5-3 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+    <span
+      className="font-mono text-[10px] uppercase tracking-[0.18em]"
+      style={{
+        // Rotate the label so it reads vertically up the rail. The
+        // `writing-mode` would be cleaner but breaks letter-spacing in
+        // some browsers, so transform-rotate it is.
+        transform: "rotate(180deg)",
+        writingMode: "vertical-rl",
+        color: "var(--bs-fg-mute)",
+      }}
+    >
+      {label}
+    </span>
+    <svg width="11" height="11" viewBox="0 0 12 12" fill="none" aria-hidden>
+      <path d="M4.5 2.5l3 3.5-3 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  </button>
+);
+
 // ── Dashboard: persistent layout with always-visible Jobs sidebar ────────
 interface DashboardProps {
   description: string;
   image: File | null;
   hasJobs: boolean;
   pipeline: PipelineState;
+  jobsCollapsed: boolean;
+  pipelineCollapsed: boolean;
   onSubmit: () => void;
   onDescriptionChange: (value: string) => void;
   onImageChange: (file: File | null) => void;
   onNew: () => void;
+  onToggleJobs: () => void;
+  onTogglePipeline: () => void;
 }
 
 const Dashboard = ({
@@ -659,15 +723,29 @@ const Dashboard = ({
   image,
   hasJobs,
   pipeline,
+  jobsCollapsed,
+  pipelineCollapsed,
   onSubmit,
   onDescriptionChange,
   onImageChange,
   onNew,
+  onToggleJobs,
+  onTogglePipeline,
 }: DashboardProps) => {
   const hasProject = pipeline.activeJobId !== null;
   const recentInstructions = pipeline.lineage
     .filter((entry) => entry.revision > 0)
     .map((entry) => entry.title);
+
+  // Build the grid template columns based on collapsed state. A
+  // collapsed column is rendered as a thin 32px rail; an expanded
+  // column gets its full width back. The rightmost workspace pane
+  // always claims whatever's left over (1fr).
+  const jobsCol = jobsCollapsed ? "32px" : "240px";
+  const pipelineCol = pipelineCollapsed ? "32px" : "320px";
+  const gridTemplateColumns = hasProject
+    ? `${jobsCol} ${pipelineCol} 1fr`
+    : `${jobsCol} 1fr`;
 
   return (
     <div className="h-screen flex flex-col">
@@ -682,32 +760,40 @@ const Dashboard = ({
       />
       <main
         className="flex-1 grid gap-2 p-2 min-h-0"
-        style={{
-          gridTemplateColumns: hasProject ? "240px 320px 1fr" : "240px 1fr",
-        }}
+        style={{ gridTemplateColumns }}
       >
-        <PromptHistory
-          activeId={pipeline.activeJobId}
-          bump={pipeline.jobsBump}
-          onSelect={(id) => void pipeline.loadJob(id)}
-          onNew={onNew}
-          onDelete={async (id) => {
-            const deleted = await deleteJob(id);
-            // If the active project (or one of its revisions) was deleted,
-            // drop back to the welcome pane.
-            pipeline.clearActiveIfDeleted(deleted);
-            // Bump to re-fetch — keeps any other tabs / lineage state in sync.
-            pipeline.bumpJobs();
-            return deleted;
-          }}
-        />
+        {jobsCollapsed ? (
+          <CollapsedRail label="Jobs" onExpand={onToggleJobs} />
+        ) : (
+          <PromptHistory
+            activeId={pipeline.activeJobId}
+            bump={pipeline.jobsBump}
+            onSelect={(id) => void pipeline.loadJob(id)}
+            onNew={onNew}
+            onCollapse={onToggleJobs}
+            onDelete={async (id) => {
+              const deleted = await deleteJob(id);
+              // If the active project (or one of its revisions) was deleted,
+              // drop back to the welcome pane.
+              pipeline.clearActiveIfDeleted(deleted);
+              // Bump to re-fetch — keeps any other tabs / lineage state in sync.
+              pipeline.bumpJobs();
+              return deleted;
+            }}
+          />
+        )}
         {hasProject ? (
           <>
-            <PipelineProgress
-              stageStatus={pipeline.stageStatus}
-              stageLogs={pipeline.stageLogs}
-              activeStage={pipeline.activeStage}
-            />
+            {pipelineCollapsed ? (
+              <CollapsedRail label="Pipeline" onExpand={onTogglePipeline} />
+            ) : (
+              <PipelineProgress
+                stageStatus={pipeline.stageStatus}
+                stageLogs={pipeline.stageLogs}
+                activeStage={pipeline.activeStage}
+                onCollapse={onTogglePipeline}
+              />
+            )}
             <div className="min-h-0 flex flex-col">
               <LineageBreadcrumb
                 entries={pipeline.lineage}
@@ -721,6 +807,7 @@ const Dashboard = ({
                   schematic={pipeline.schematic}
                   gerber={pipeline.gerber}
                   bom={pipeline.bom}
+                  firmware={pipeline.firmware}
                   jobId={pipeline.jobId}
                 />
               </div>
@@ -749,13 +836,58 @@ const Dashboard = ({
 };
 
 // ── Root ────────────────────────────────────────────────────────────────
+// Persist sidebar collapse state across reloads — once a user finds the
+// layout they like, it should stick. localStorage keeps it client-only
+// so each user can have their own preference without DB plumbing.
+const COLLAPSE_STORAGE_KEY = "boardsmith.layout.v1";
+
+interface CollapseState {
+  jobs: boolean;
+  pipeline: boolean;
+}
+
+function readCollapseState(): CollapseState {
+  if (typeof window === "undefined") return { jobs: false, pipeline: false };
+  try {
+    const raw = window.localStorage.getItem(COLLAPSE_STORAGE_KEY);
+    if (!raw) return { jobs: false, pipeline: false };
+    const parsed = JSON.parse(raw) as Partial<CollapseState>;
+    return {
+      jobs: Boolean(parsed.jobs),
+      pipeline: Boolean(parsed.pipeline),
+    };
+  } catch {
+    return { jobs: false, pipeline: false };
+  }
+}
+
 const AppInner = () => {
   const { session, loading } = useAuth();
   const [description, setDescription] = useState(DEMO_PROMPT);
   const [image, setImage] = useState<File | null>(null);
   const [hasJobs, setHasJobs] = useState(false);
   const [autoOpened, setAutoOpened] = useState(false);
+  const [collapse, setCollapse] = useState<CollapseState>(readCollapseState);
   const pipeline = useRealPipeline();
+
+  // Mirror collapse state to localStorage so the layout persists between
+  // sessions / reloads.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(
+        COLLAPSE_STORAGE_KEY,
+        JSON.stringify(collapse),
+      );
+    } catch {
+      // ignore quota / privacy mode errors
+    }
+  }, [collapse]);
+
+  const toggleJobs = () =>
+    setCollapse((prev) => ({ ...prev, jobs: !prev.jobs }));
+  const togglePipeline = () =>
+    setCollapse((prev) => ({ ...prev, pipeline: !prev.pipeline }));
 
   const submit = async () => {
     await pipeline.start(description, image);
@@ -820,10 +952,14 @@ const AppInner = () => {
       image={image}
       hasJobs={hasJobs}
       pipeline={pipeline}
+      jobsCollapsed={collapse.jobs}
+      pipelineCollapsed={collapse.pipeline}
       onSubmit={submit}
       onDescriptionChange={setDescription}
       onImageChange={setImage}
       onNew={newProject}
+      onToggleJobs={toggleJobs}
+      onTogglePipeline={togglePipeline}
     />
   );
 };

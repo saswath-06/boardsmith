@@ -11,6 +11,7 @@ import ViewerTabs from "./Viewers";
 import type {
   Board3DData,
   BomData,
+  FirmwareData,
   GerberData,
   JobSnapshot,
   SchematicData,
@@ -21,6 +22,7 @@ interface ProjectedSnapshot {
   schematic: SchematicData | null;
   gerber: GerberData | null;
   bom: BomData | null;
+  firmware: FirmwareData | null;
   designNotes: string[];
 }
 
@@ -29,6 +31,7 @@ function projectPublicSnapshot(snapshot: JobSnapshot): ProjectedSnapshot {
   let schematic: SchematicData | null = null;
   let gerber: GerberData | null = null;
   let bom: BomData | null = null;
+  let firmware: FirmwareData | null = null;
   let designNotes: string[] = [];
 
   for (const event of snapshot.events) {
@@ -52,9 +55,12 @@ function projectPublicSnapshot(snapshot: JobSnapshot): ProjectedSnapshot {
     if (event.stage === "bom" && payload && typeof payload === "object" && "lines" in payload) {
       bom = payload as unknown as BomData;
     }
+    if (event.stage === "firmware" && payload && typeof payload === "object" && "code" in payload) {
+      firmware = payload as unknown as FirmwareData;
+    }
   }
 
-  return { data, schematic, gerber, bom, designNotes };
+  return { data, schematic, gerber, bom, firmware, designNotes };
 }
 
 const PublicViewer = () => {
@@ -67,6 +73,7 @@ const PublicViewer = () => {
     schematic: null,
     gerber: null,
     bom: null,
+    firmware: null,
     designNotes: [],
   });
 
@@ -192,6 +199,7 @@ const PublicViewer = () => {
             schematic={projected.schematic}
             gerber={projected.gerber}
             bom={projected.bom}
+            firmware={projected.firmware}
             jobId={snapshot.job_id}
             readOnly
           />

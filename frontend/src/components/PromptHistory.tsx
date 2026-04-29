@@ -12,6 +12,9 @@ interface PromptHistoryProps {
   onNew: () => void;
   /** Returns the list of cascaded job_ids actually removed (parent + revisions). */
   onDelete: (jobId: string) => Promise<string[]>;
+  /** When provided, renders a "<<" button in the header that collapses
+   *  the column horizontally, freeing space for the workspace. */
+  onCollapse?: () => void;
 }
 
 interface Thread {
@@ -178,7 +181,7 @@ const JobRow = ({ job, active, isRevision, deleting, onClick, onDeleteClick }: R
   );
 };
 
-const PromptHistory = ({ activeId, bump, onSelect, onNew, onDelete }: PromptHistoryProps) => {
+const PromptHistory = ({ activeId, bump, onSelect, onNew, onDelete, onCollapse }: PromptHistoryProps) => {
   const [jobs, setJobs] = useState<JobSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
@@ -244,13 +247,41 @@ const PromptHistory = ({ activeId, bump, onSelect, onNew, onDelete }: PromptHist
         >
           Jobs
         </span>
-        <button
-          onClick={onNew}
-          className="font-mono text-[10px] uppercase tracking-widest hover:text-[color:var(--bs-copper)]"
-          style={{ color: "var(--bs-fg-dim)" }}
-        >
-          + New
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={onNew}
+            className="font-mono text-[10px] uppercase tracking-widest hover:text-[color:var(--bs-copper)]"
+            style={{ color: "var(--bs-fg-dim)" }}
+          >
+            + New
+          </button>
+          {onCollapse && (
+            <button
+              type="button"
+              onClick={onCollapse}
+              className="h-6 w-6 rounded flex items-center justify-center transition-colors"
+              style={{
+                color: "var(--bs-fg-dim)",
+                border: "1px solid var(--bs-line-soft)",
+                background: "var(--bs-bg-2)",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.color = "var(--bs-copper)";
+                e.currentTarget.style.borderColor = "var(--bs-copper)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.color = "var(--bs-fg-dim)";
+                e.currentTarget.style.borderColor = "var(--bs-line-soft)";
+              }}
+              title="Collapse jobs column"
+              aria-label="Collapse jobs column"
+            >
+              <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
+                <path d="M7.5 2.5l-3 3.5 3 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </button>
+          )}
+        </div>
       </div>
       <div className="flex-1 overflow-y-auto bs-scroll px-2 py-2 space-y-2">
         {error && (

@@ -1,9 +1,16 @@
 // Three viewers + tabs + EDA-tool footer.
 import { Fragment, useState } from "react";
-import type { BomData, Board3DData, GerberData, SchematicData } from "../types";
+import type {
+  BomData,
+  Board3DData,
+  FirmwareData,
+  GerberData,
+  SchematicData,
+} from "../types";
 import { artifactUrl } from "../api";
 import { useAuth } from "../lib/auth";
 import Board3DViewer from "./Board3DViewer";
+import FirmwareViewer from "./FirmwareViewer";
 
 // ── PCB layout viewer — top-down board render with traces, pads, components.
 interface PcbLayoutViewerProps {
@@ -152,10 +159,85 @@ const CATEGORY_BADGE: Record<string, string> = {
   connector:       "var(--bs-copper)",
 };
 
+// ── Live JLCPCB cost model ────────────────────────────────────────────────
+// Mirrors backend/app/cost.py so the slider/input can recompute the
+// estimate every keystroke without a backend round-trip. Numbers match
+// JLCPCB's 100×100 mm 2-layer green soldermask + 1-side SMT pricing.
+const QTY_MIN = 1;
+const QTY_MAX = 500;
+const SCRAP_BUFFER = 1.05;
+const SMT_SETUP_USD = 8.0;
+const SMT_PLACEMENT_PER_JOINT = 0.0017;
+const STENCIL_USD = 8.0;
+const SHIPPING_USD = 5.0;
+
+// Tiered PCB fab cost (USD). Sorted by qty; we pick the smallest tier
+// at-or-above the requested quantity so the estimate stays conservative.
+const PCB_FAB_TIERS: Array<[number, number]> = [
+  [5, 2.0],
+  [30, 8.0],
+  [100, 25.0],
+  [200, 45.0],
+  [500, 95.0],
+];
+
+function pickPcbFabCost(qty: number): number {
+  for (const [tier, price] of PCB_FAB_TIERS) {
+    if (qty <= tier) return price;
+  }
+  return PCB_FAB_TIERS[PCB_FAB_TIERS.length - 1][1];
+}
+
+interface LiveCostEstimate {
+  qty: number;
+  parts: number;
+  pcb_fab: number;
+  smt_setup: number;
+  smt_placement: number;
+  stencil: number;
+  shipping: number;
+  total: number;
+  smt_joints: number;
+}
+
+function buildLiveEstimate(
+  unitCostUsd: number,
+  smtJoints: number,
+  rawQty: number,
+): LiveCostEstimate {
+  const qty = Math.max(QTY_MIN, Math.min(QTY_MAX, Math.round(rawQty || 1)));
+  const parts = unitCostUsd * qty * SCRAP_BUFFER;
+  const pcbFab = pickPcbFabCost(qty);
+  const hasSmt = smtJoints > 0;
+  const smtSetup = hasSmt ? SMT_SETUP_USD : 0;
+  const smtPlacement = hasSmt ? smtJoints * qty * SMT_PLACEMENT_PER_JOINT : 0;
+  const stencil = hasSmt ? STENCIL_USD : 0;
+  const total =
+    parts + pcbFab + smtSetup + smtPlacement + stencil + SHIPPING_USD;
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+  return {
+    qty,
+    parts: round2(parts),
+    pcb_fab: round2(pcbFab),
+    smt_setup: round2(smtSetup),
+    smt_placement: round2(smtPlacement),
+    stencil: round2(stencil),
+    shipping: round2(SHIPPING_USD),
+    total: round2(total),
+    smt_joints: smtJoints,
+  };
+}
+
+const QTY_PRESETS: number[] = [5, 30, 100, 250, 500];
+
 export const BomViewer = ({ bom, readOnly = false }: BomViewerProps) => {
-  const estimates = bom?.cost_estimates ?? [];
-  const defaultQty = estimates[0]?.qty ?? 5;
-  const [selectedQty, setSelectedQty] = useState<number>(defaultQty);
+  // Default to 5 boards — the JLCPCB minimum — so the estimate is never
+  // empty even on the first render before the user touches the input.
+  const [selectedQty, setSelectedQty] = useState<number>(5);
+  // Allow an in-flight empty / partial input without overwriting the
+  // committed quantity. The text mirror is what the <input> shows;
+  // selectedQty is what we actually price against.
+  const [qtyText, setQtyText] = useState<string>("5");
 
   if (!bom) return <div className="bs-skeleton h-full w-full" />;
   if (!bom.lines.length) {
@@ -177,7 +259,15 @@ export const BomViewer = ({ bom, readOnly = false }: BomViewerProps) => {
       : null;
 
   const activeEstimate =
-    estimates.find((e) => e.qty === selectedQty) ?? estimates[0] ?? null;
+    totalCost !== null
+      ? buildLiveEstimate(totalCost, bom.smt_joints ?? 0, selectedQty)
+      : null;
+
+  const commitQty = (raw: number) => {
+    const clamped = Math.max(QTY_MIN, Math.min(QTY_MAX, Math.round(raw || 1)));
+    setSelectedQty(clamped);
+    setQtyText(String(clamped));
+  };
 
   return (
     <div className="h-full w-full overflow-auto bs-scroll" style={{ background: "var(--bs-bg)" }}>
@@ -240,7 +330,7 @@ export const BomViewer = ({ bom, readOnly = false }: BomViewerProps) => {
           }}
         >
           <div
-            className="flex items-center gap-2 px-4 py-2.5 border-b"
+            className="flex items-center gap-3 px-4 py-2.5 border-b flex-wrap"
             style={{ borderColor: "var(--bs-line-soft)" }}
           >
             <span
@@ -249,26 +339,87 @@ export const BomViewer = ({ bom, readOnly = false }: BomViewerProps) => {
             >
               All-in build estimate
             </span>
-            <span style={{ color: "var(--bs-line)" }}>·</span>
+
+            {/* Direct number input — type any qty between 1 and 500. */}
+            <div className="flex items-center gap-1.5">
+              <input
+                type="number"
+                min={QTY_MIN}
+                max={QTY_MAX}
+                step={1}
+                value={qtyText}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setQtyText(v);
+                  if (v === "") return;
+                  const n = Number(v);
+                  if (Number.isFinite(n) && n >= QTY_MIN && n <= QTY_MAX) {
+                    setSelectedQty(Math.round(n));
+                  }
+                }}
+                onBlur={(e) => commitQty(Number(e.target.value))}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.currentTarget.blur();
+                  }
+                }}
+                className="w-16 px-2 py-1 rounded font-mono text-[12px] text-right tabular-nums outline-none"
+                style={{
+                  background: "var(--bs-bg)",
+                  color: "var(--bs-fg)",
+                  border: "1px solid var(--bs-copper)",
+                }}
+                aria-label="Board quantity"
+              />
+              <span
+                className="font-mono text-[11px]"
+                style={{ color: "var(--bs-fg-mute)" }}
+              >
+                boards
+              </span>
+            </div>
+
+            {/* Slider — drag to scrub from 1 to 500. */}
+            <input
+              type="range"
+              min={QTY_MIN}
+              max={QTY_MAX}
+              step={1}
+              value={selectedQty}
+              onChange={(e) => {
+                const n = Number(e.target.value);
+                setSelectedQty(n);
+                setQtyText(String(n));
+              }}
+              className="bs-qty-slider flex-1 min-w-[120px] max-w-[260px] accent-current"
+              style={{ accentColor: "var(--bs-copper)" }}
+              aria-label="Board quantity slider"
+            />
+
+            {/* Quick preset chips — common JLCPCB order sizes. */}
             <div className="flex items-center gap-1">
-              {estimates.map((est) => {
-                const isActive = est.qty === activeEstimate.qty;
+              {QTY_PRESETS.map((q) => {
+                const isActive = q === selectedQty;
                 return (
                   <button
-                    key={est.qty}
-                    onClick={() => setSelectedQty(est.qty)}
-                    className="px-2.5 py-1 rounded font-mono text-[11px] transition-colors"
+                    key={q}
+                    type="button"
+                    onClick={() => commitQty(q)}
+                    className="px-2 py-0.5 rounded font-mono text-[10.5px] transition-colors"
                     style={{
                       background: isActive ? "var(--bs-copper)" : "transparent",
-                      color: isActive ? "var(--bs-bg)" : "var(--bs-fg-mute)",
-                      border: `1px solid ${isActive ? "var(--bs-copper)" : "var(--bs-line-soft)"}`,
+                      color: isActive ? "var(--bs-bg)" : "var(--bs-fg-dim)",
+                      border: `1px solid ${
+                        isActive ? "var(--bs-copper)" : "var(--bs-line-soft)"
+                      }`,
                     }}
                   >
-                    {est.qty} boards
+                    {q}
                   </button>
                 );
               })}
             </div>
+
             <span
               className="ml-auto font-mono text-[10px]"
               style={{ color: "var(--bs-fg-dim)" }}
@@ -278,8 +429,9 @@ export const BomViewer = ({ bom, readOnly = false }: BomViewerProps) => {
           </div>
           <div className="px-4 py-3 font-mono text-[12px]">
             <CostLine
-              label={`Parts (${activeEstimate.qty}× × 1.05 buffer)`}
+              label={`Parts (${activeEstimate.qty} × $${(totalCost ?? 0).toFixed(2)})`}
               value={activeEstimate.parts}
+              hint="× 1.05 scrap buffer"
             />
             <CostLine
               label={`PCB fabrication (${activeEstimate.qty} boards)`}
@@ -536,6 +688,7 @@ const VIEWER_TABS = [
   { id: "3d",        label: "3D Board",   sub: "three.js · GL render" },
   { id: "pcb",       label: "PCB Layout", sub: "top view · F.Cu" },
   { id: "schematic", label: "Schematic",  sub: "schemdraw · SVG" },
+  { id: "firmware",  label: "Firmware",   sub: "Arduino .ino · pin-aware" },
   { id: "bom",       label: "BOM",        sub: "parts list · LCSC" },
 ] as const;
 
@@ -586,6 +739,7 @@ interface ViewerTabsProps {
   schematic: SchematicData | null;
   gerber: GerberData | null;
   bom: BomData | null;
+  firmware: FirmwareData | null;
   jobId: string | null;
   /** When true, hide all download/simulate/KiCad action bars. Used by
    *  the public-share viewer so anonymous visitors can browse but not
@@ -593,7 +747,15 @@ interface ViewerTabsProps {
   readOnly?: boolean;
 }
 
-const ViewerTabs = ({ data, schematic, gerber, bom, jobId, readOnly = false }: ViewerTabsProps) => {
+const ViewerTabs = ({
+  data,
+  schematic,
+  gerber,
+  bom,
+  firmware,
+  jobId,
+  readOnly = false,
+}: ViewerTabsProps) => {
   const [active, setActive] = useState<TabId>("3d");
   const { session } = useAuth();
   const token = session?.access_token ?? null;
@@ -608,6 +770,10 @@ const ViewerTabs = ({ data, schematic, gerber, bom, jobId, readOnly = false }: V
   const bomJlcpcbName = bom?.filenames?.bom_jlcpcb_csv ?? "boardsmith_BOM_JLCPCB.csv";
   const cplHref = gerber?.cpl_url ? artifactUrl(gerber.cpl_url, token) : "";
   const bundleIncludes = gerber?.bundle_includes ?? [];
+  const firmwareHref = firmware?.artifacts?.firmware_ino
+    ? artifactUrl(firmware.artifacts.firmware_ino, token)
+    : "";
+  const firmwareFilename = firmware?.filename ?? "main.ino";
   return (
     <section className="bs-panel flex flex-col h-full overflow-hidden">
       {/* tab bar */}
@@ -643,6 +809,7 @@ const ViewerTabs = ({ data, schematic, gerber, bom, jobId, readOnly = false }: V
         <div className={`absolute inset-0 ${active === "3d" ? "block" : "hidden"}`}><Board3DViewer data={data}/></div>
         <div className={`absolute inset-0 ${active === "pcb" ? "block" : "hidden"}`}><PcbLayoutViewer data={data}/></div>
         <div className={`absolute inset-0 ${active === "schematic" ? "block" : "hidden"}`}><SchematicViewer svg={schematic?.svg}/></div>
+        <div className={`absolute inset-0 ${active === "firmware" ? "block" : "hidden"}`}><FirmwareViewer firmware={firmware}/></div>
         <div className={`absolute inset-0 ${active === "bom" ? "block" : "hidden"}`}><BomViewer bom={bom} readOnly={readOnly}/></div>
       </div>
 
@@ -775,6 +942,51 @@ const ViewerTabs = ({ data, schematic, gerber, bom, jobId, readOnly = false }: V
               CPL
             </a>
           )}
+        </div>
+      )}
+
+      {/* Firmware download bar — Arduino .ino with the actual pin assignments */}
+      {!readOnly && firmware?.code && firmwareHref && (
+        <div
+          className="flex items-center gap-3 px-4 py-2.5 border-t"
+          style={{ borderColor: "var(--bs-line-soft)", background: "var(--bs-panel-2)" }}
+        >
+          <span className="bs-pill" style={{ color: "var(--bs-cyan)" }}>
+            <span
+              className="h-1.5 w-1.5 rounded-full"
+              style={{ background: "var(--bs-cyan)" }}
+            />
+            Firmware
+          </span>
+          <div className="flex-1 min-w-0">
+            <div className="text-[13px] font-medium truncate" style={{ color: "var(--bs-fg)" }}>
+              Starter Arduino sketch · {firmwareFilename}
+            </div>
+            <div className="font-mono text-[10px] truncate" style={{ color: "var(--bs-fg-dim)" }}>
+              {firmware.target_board
+                ? `${firmware.target_board}${
+                    firmware.framework ? ` · ${firmware.framework}` : ""
+                  }`
+                : "pin-aware sketch ready to flash"}
+            </div>
+          </div>
+          <a
+            href={firmwareHref}
+            download={firmwareFilename}
+            className="bs-btn-ghost px-3 py-2 rounded text-[12px] flex items-center gap-2 no-underline"
+            title="Download the Arduino .ino sketch — also bundled inside the manufacturing zip under firmware/"
+          >
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+              <path
+                d="M8 2v8m0 0l-3-3m3 3l3-3M3 13h10"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+            main.ino
+          </a>
         </div>
       )}
 

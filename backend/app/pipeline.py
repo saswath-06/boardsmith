@@ -8,6 +8,7 @@ from typing import Any, Awaitable, Callable
 from app.bom import build_bom, write_bom_csv, write_jlcpcb_csv
 from app.cpl import write_cpl_csv
 from app.falstad import circuit_to_falstad, falstad_simulate_url, simulation_summary
+from app.firmware import generate_starter_firmware
 from app.gerber import write_gerber_zip
 from app.kicad_writer import write_kicad_schematic
 from app.llm import (
@@ -192,9 +193,38 @@ async def _run_downstream(job: JobRecord, design: CircuitDesign) -> None:
         lambda exc: {"svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><text x=\"20\" y=\"30\">Schematic fallback</text></svg>", "error": str(exc)},
     )
 
-    # Track BOM/CPL output paths so the gerber stage can fold them into the
-    # downloadable manufacturing bundle.
+    # Track BOM/CPL/firmware output paths so the gerber stage can fold them
+    # into the downloadable manufacturing bundle.
     bundle_files: dict[str, Path] = {}
+
+    async def firmware_action() -> dict[str, Any]:
+        result = generate_starter_firmware(design)
+        if result is None:
+            return {
+                "code": None,
+                "reason": "no MCU in design — firmware stage skipped",
+            }
+        firmware_dir = job.output_dir / "firmware"
+        firmware_dir.mkdir(exist_ok=True)
+        ino_path = firmware_dir / result.get("filename", "main.ino")
+        ino_path.write_text(result["code"], encoding="utf-8")
+        STORE.add_artifact(job.job_id, "firmware_ino", ino_path)
+        bundle_files[f"firmware/{ino_path.name}"] = ino_path
+        return {
+            **result,
+            "artifacts": {
+                "firmware_ino": f"/api/jobs/{job.job_id}/artifact/firmware_ino",
+            },
+        }
+
+    await _safe_stage(
+        job,
+        "firmware",
+        "Generating starter Arduino sketch from the schematic.",
+        "Starter firmware ready.",
+        firmware_action,
+        lambda exc: {"code": None, "reason": f"firmware generation failed: {exc}"},
+    )
 
     async def bom_action() -> dict[str, Any]:
         bom = build_bom(design)

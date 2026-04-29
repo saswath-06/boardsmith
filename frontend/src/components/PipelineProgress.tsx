@@ -6,6 +6,7 @@ type StageRowStatus = StageStatus | "waiting";
 const STAGES: Array<[string, string, string]> = [
   ["parse",      "Parse intent",     "gemini-2.5-pro"],
   ["schematic",  "Schematic",        "SVG + KiCad .kicad_sch"],
+  ["firmware",   "Firmware",         "gemini-2.5-pro · Arduino"],
   ["bom",        "Bill of materials", "grouped parts · LCSC + JLCPCB CSV"],
   ["pcb_layout", "PCB layout",       "force-directed placement"],
   ["routing",    "Auto-route",       "lee · grid 0.25mm"],
@@ -137,9 +138,12 @@ interface PipelineProgressProps {
   stageStatus: Record<string, StageRowStatus>;
   stageLogs: Record<string, LogEntry[]>;
   activeStage: string | null;
+  /** When provided, renders a "<<" button in the header that collapses
+   *  the column horizontally, freeing space for the viewer pane. */
+  onCollapse?: () => void;
 }
 
-const PipelineProgress = ({ stageStatus, stageLogs, activeStage }: PipelineProgressProps) => {
+const PipelineProgress = ({ stageStatus, stageLogs, activeStage, onCollapse }: PipelineProgressProps) => {
   return (
     <aside className="bs-panel flex flex-col h-full">
       {/* header */}
@@ -149,10 +153,38 @@ const PipelineProgress = ({ stageStatus, stageLogs, activeStage }: PipelineProgr
             Pipeline
           </span>
         </div>
-        <span className="bs-pill" style={{ color: "var(--bs-cyan)" }}>
-          <span className="h-1.5 w-1.5 rounded-full bs-pulse" style={{ background: "var(--bs-cyan)" }} />
-          SSE
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="bs-pill" style={{ color: "var(--bs-cyan)" }}>
+            <span className="h-1.5 w-1.5 rounded-full bs-pulse" style={{ background: "var(--bs-cyan)" }} />
+            SSE
+          </span>
+          {onCollapse && (
+            <button
+              type="button"
+              onClick={onCollapse}
+              className="h-6 w-6 rounded flex items-center justify-center transition-colors"
+              style={{
+                color: "var(--bs-fg-dim)",
+                border: "1px solid var(--bs-line-soft)",
+                background: "var(--bs-bg-2)",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.color = "var(--bs-copper)";
+                e.currentTarget.style.borderColor = "var(--bs-copper)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.color = "var(--bs-fg-dim)";
+                e.currentTarget.style.borderColor = "var(--bs-line-soft)";
+              }}
+              title="Collapse pipeline column"
+              aria-label="Collapse pipeline column"
+            >
+              <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
+                <path d="M7.5 2.5l-3 3.5 3 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </button>
+          )}
+        </div>
       </div>
       {/* steps */}
       <ol className="flex-1 px-4 py-4 overflow-y-auto bs-scroll">

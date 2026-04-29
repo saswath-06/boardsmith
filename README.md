@@ -2,7 +2,7 @@
 
 > Plain English in. Manufacturable PCB out.
 
-Describe a circuit in natural language — or **drop a hand-drawn sketch / breadboard photo** — and Boardsmith parses it with Gemini, lays out the board, routes copper, renders a 3D view, prices an all-in JLCPCB build, and gives you back a single zip that JLCPCB can manufacture.
+Describe a circuit in natural language — or **drop a hand-drawn sketch / breadboard photo** — and Boardsmith parses it with Gemini, lays out the board, routes copper, renders a 3D view, generates starter Arduino firmware, prices an all-in JLCPCB build, and gives you back a single zip that JLCPCB can manufacture.
 
 Live demo: <https://boardsmith.up.railway.app>
 
@@ -11,11 +11,11 @@ Plain English  ─┐
                 ├─►  Gemini 2.5 Pro / Vision  ──►  CircuitDesign JSON
 Sketch / photo ─┘
                                                         │
-   ┌────────────────────────────────────────────────────┼────────────────────────────────────────────────┐
-   ▼                                ▼                   ▼                ▼                ▼              ▼
-Schematic SVG +              Force-directed         Lee-algorithm     3D Three.js     BOM + CPL +     Gerber RS-274X +
-KiCad .kicad_sch +            placement              autorouter        FR4 board       JLCPCB cost     Excellon drill
-Falstad simulate URL                                                                    breakdown       (one zip)
+   ┌────────────────────────────────────────────────────┼─────────────────────────────────────────────────────────────┐
+   ▼                  ▼                  ▼              ▼                ▼                ▼                ▼          ▼
+Schematic SVG +    Starter           Force-directed  Lee-algorithm    3D Three.js     BOM + CPL +      Gerber RS-274X +
+KiCad .kicad_sch + Arduino .ino       placement       autorouter       FR4 board       JLCPCB cost      Excellon drill
+Falstad URL        (pin-aware)                                                          slider 1-500    (one zip + .ino)
 ```
 
 Every stage emits a Server-Sent Event so the UI fills in as each artifact lands. Jobs are persisted to Postgres so refinements and revisions survive a redeploy.
@@ -25,11 +25,12 @@ Every stage emits a Server-Sent Event so the UI fills in as each artifact lands.
 ## Highlights
 
 - **Auth + Postgres.** Supabase Google OAuth on the front, asyncpg-backed jobs table on the back. Every query is scoped by `user_id`; modern asymmetric Supabase JWTs (ES256/RS256 via JWKS) work alongside the legacy HS256 secret.
-- **Persistent dashboard with a jobs sidebar.** Three-pane IDE layout that's always visible — auto-loads your most recent project on sign-in, lets you click between past designs, and lets you delete projects (cascading their refinement chain) right from the sidebar.
+- **Persistent dashboard with a jobs sidebar.** Three-pane IDE layout that's always visible — auto-loads your most recent project on sign-in, lets you click between past designs, and lets you delete projects (cascading their refinement chain) right from the sidebar. **The jobs and pipeline columns each collapse horizontally** to a 32-pixel rail, freeing up to ~540 px of width for the viewer pane; preference is persisted to `localStorage`.
+- **Auto-generated starter firmware.** When the parsed design has an MCU (ESP32 / Nano / STM32F103), Boardsmith hits Gemini once more with the schematic's actual net assignments and emits an Arduino-flavored `.ino` sketch — pin defines, sensor reads with `Wire.h`, button debounce, blink loops, comments pointing at off-board headers. The sketch lands in a new **Firmware** tab with line numbers + Copy and is bundled into the manufacturing zip as `firmware/main.ino`. No MCU? The stage cleanly skips with a "no firmware needed" placeholder.
 - **One-click Falstad SPICE simulation.** Each schematic export bundles a Falstad `circuitjs1` URL — open it and watch current flow, LEDs light up, capacitors charge. The exporter detects R+LED+button branches, picks a sensible supply voltage (5V default, 3.3V for ESP32/STM32, 3.7V for LiPo), and suppresses the button when there's nothing simulatable so the demo never opens into a short circuit.
-- **JLCPCB-ready manufacturing bundle.** A single `*_manufacturing_bundle.zip` containing Gerbers, drill, engineering BOM, JLCPCB-format BOM, and a CPL pick-and-place file — auto-detected by JLCPCB's quote uploader.
-- **All-in JLCPCB cost breakdown.** A receipt-style breakdown on the BOM tab that uses JLCPCB's published pricing (parts + 5% scrap buffer, board fab tier, $8 SMT setup, $0.0017/joint placement, stencil, shipping) for 5 / 30 / 100-board tiers. Answers "how much for 5 boards assembled?" with a real number.
-- **Public share links.** Hit **Share** in the top bar to publish a read-only link at `/p/<job_id>` — no auth, no downloads, just the live 3D / PCB / schematic / BOM tabs. Great for portfolio links and Discord drops.
+- **JLCPCB-ready manufacturing bundle.** A single `*_manufacturing_bundle.zip` containing Gerbers, drill, engineering BOM, JLCPCB-format BOM, CPL pick-and-place file, and the auto-generated `firmware/main.ino` — auto-detected by JLCPCB's quote uploader.
+- **Live JLCPCB cost calculator.** A receipt-style breakdown on the BOM tab with a **number input + slider that scrub from 1 to 500 boards** in real time. Uses JLCPCB's published pricing (parts + 5% scrap buffer, tiered board fab from 5 to 500, $8 SMT setup, $0.0017/joint placement, stencil, shipping). Quick-pick chips for 5 / 30 / 100 / 250 / 500 if you don't feel like typing. Answers "how much for 47 boards assembled?" with a real number.
+- **Public share links.** Hit **Share** in the top bar to publish a read-only link at `/p/<job_id>` — no auth, no downloads, just the live 3D / PCB / schematic / firmware / BOM tabs. Great for portfolio links and Discord drops.
 - **Multimodal prompts.** The prompt box accepts a paperclip-attached image, a drag-and-dropped file, or a paste from clipboard. Gemini Vision extracts components and connections from the picture; optional accompanying text becomes additional guidance.
 - **Intent-level prompts.** Describe the *goal* (`"a PCB to control water dispense times"`, `"a smart doorbell"`) and Gemini designs a sensible minimal system — picks an MCU, breaks unsupported parts (relays, motors, displays) out to a header for an off-board driver, and explains every choice it made.
 - **Design notes panel.** Every project shows a dedicated "Design notes" card above the viewer tabs listing each design decision the LLM made (MCU choice, power chain, off-board breakouts). Separate from warnings so rationale never gets mixed with actual problems.
@@ -126,10 +127,11 @@ All `/api/jobs/*` endpoints require a Supabase JWT (`Authorization: Bearer …`,
 - `schematic_svg` — readable schematic for the in-app viewer
 - `kicad_schematic` — native KiCad 10 `.kicad_sch`
 - `falstad_txt` — Falstad `circuitjs1` text file (when simulatable)
+- `firmware_ino` — Arduino-flavored starter sketch (only when the design has a supported MCU)
 - `bom_json` / `bom_csv` / `bom_jlcpcb_csv` — three views of the BOM
 - `cpl_csv` — JLCPCB-format pick-and-place file
 - `layout_json` / `pcb_svg` — top-down PCB render data
-- `gerbers` — `*_manufacturing_bundle.zip` (Gerbers + drill + BOMs + CPL)
+- `gerbers` — `*_manufacturing_bundle.zip` (Gerbers + drill + BOMs + CPL + firmware/main.ino)
 
 ---
 
@@ -141,37 +143,38 @@ Each stage emits SSE events with `stage / status / data / message`.
 | --- | --- | --- |
 | 1 | `parse` | Gemini → strict JSON → Pydantic. Vision branch when an image is attached. |
 | 2 | `schematic` | SVG + KiCad `.kicad_sch` + Falstad text + simulate URL |
-| 3 | `bom` | Group identical parts, look up LCSC numbers, price each line, compute SMT joint count, generate cost tiers, write engineering CSV + JLCPCB CSV |
-| 4 | `pcb_layout` | Force-directed placement on a dynamically-sized board |
-| 5 | `routing` | Lee grid router; ratsnest fallback per net. Writes CPL after layout. |
-| 6 | `3d` | Three.js board data: substrate, traces, pads, components |
-| 7 | `gerber` | Bundles Gerbers + drill + BOMs + CPL into one JLCPCB-ready zip |
+| 3 | `firmware` | If the design has an MCU, Gemini emits a pin-aware Arduino `.ino` sketch. Skipped cleanly otherwise. |
+| 4 | `bom` | Group identical parts, look up LCSC numbers, price each line, compute SMT joint count, generate cost tiers, write engineering CSV + JLCPCB CSV |
+| 5 | `pcb_layout` | Force-directed placement on a dynamically-sized board |
+| 6 | `routing` | Lee grid router; ratsnest fallback per net. Writes CPL after layout. |
+| 7 | `3d` | Three.js board data: substrate, traces, pads, components |
+| 8 | `gerber` | Bundles Gerbers + drill + BOMs + CPL + firmware/main.ino into one JLCPCB-ready zip |
 
 ---
 
 ## JLCPCB cost model
 
-Implemented in [`backend/app/cost.py`](backend/app/cost.py). Targets a default 100×100 mm 2-layer green-soldermask board with one-side SMT.
+The pricing model lives in [`backend/app/cost.py`](backend/app/cost.py); the BOM viewer mirrors it in TypeScript so a slider can recompute the receipt every keystroke without a backend round-trip. Targets a default 100×100 mm 2-layer green-soldermask board with one-side SMT.
 
 | Component | Source / value |
 | --- | --- |
 | Parts | `total_unit_cost_usd × qty × 1.05` (5% scrap buffer) |
-| PCB fab | Tiered lookup: 5 boards = $2.00, 30 = $8.00, 100 = $25.00 |
+| PCB fab | Tiered lookup: 5 = $2, 30 = $8, 100 = $25, 200 = $45, 500 = $95 |
 | SMT setup | $8.00 flat, one-time per order |
 | SMT placement | `joints × qty × $0.0017` (JLCPCB published rate) |
 | Stencil | $8.00 (skipped when `joints == 0`) |
 | Shipping | $5.00 flat (DHL economy estimate) |
 
-The BOM viewer surfaces this as a tier pill (`5 boards · 30 boards · 100 boards`) plus a receipt:
+The BOM viewer surfaces this as a number input + slider that scrubs from 1 to 500 boards in real time, with quick-pick chips for 5 / 30 / 100 / 250 / 500 and a receipt that updates live:
 
 ```
-Parts (5× × 1.05 buffer)         $12.34
-PCB fabrication (5 boards)        $2.00
-SMT setup + stencil               $16.00
-Component placement (84 joints)    $0.71
-Shipping (DHL economy)             $5.00
-─────────────────────────────────────────
-All-in build           $36.05  ($7.21/board)
+Parts (47 × $2.35)              $116.00   × 1.05 scrap buffer
+PCB fabrication (47 boards)      $25.00
+SMT setup + stencil              $16.00   $8.00 setup + $8.00 stencil
+Component placement              $13.59   84 joints × 47 · $0.0017 per joint
+Shipping (DHL economy)            $5.00
+──────────────────────────────────────────
+All-in build         $175.59   ($3.74/board)
 ```
 
 ---
@@ -247,8 +250,9 @@ backend/
     auth.py             Supabase JWT verification (HS256 + JWKS asymmetric)
     db.py               asyncpg pool + idempotent schema/migration
     storage.py          jobs hot cache + Postgres durable record + delete cascade + publish
-    pipeline.py         orchestrates the 7-stage pipeline (text or vision branch)
+    pipeline.py         orchestrates the 8-stage pipeline (text or vision branch)
     llm.py              Gemini parsing — parse_with_gemini + parse_with_gemini_vision
+    firmware.py         MCU detection + Gemini → Arduino .ino + deterministic fallback
     component_library.py
     pin_aliases.py
     schematic.py        SVG schematic renderer
@@ -266,20 +270,22 @@ backend/
 frontend/
   src/
     main.tsx            BrowserRouter wrapper
-    App.tsx             Routes (/ vs /p/:id), persistent dashboard, SSE pipeline hook
+    App.tsx             Routes (/ vs /p/:id), persistent dashboard with collapsible columns, SSE pipeline hook
     api.ts              REST + EventSource + auth-aware fetch wrappers
-    types.ts            mirrors backend Pydantic models (incl. CostEstimate)
+    types.ts            mirrors backend Pydantic models (incl. FirmwareData, CostEstimate)
     lib/
       auth.tsx          Supabase auth context + access-token accessor
       supabase.ts       singleton client
     components/
       AuthGate.tsx      sign-in screen (Google OAuth)
       Board3DViewer.tsx Three.js board with OrbitControls
-      Viewers.tsx       3D / PCB / Schematic / BOM tabs (+ readOnly mode)
+      Viewers.tsx       3D / PCB / Schematic / Firmware / BOM tabs (+ readOnly mode + live cost slider)
+      FirmwareViewer.tsx Arduino .ino viewer with line numbers + Copy
+      DesignNotes.tsx   collapsible LLM-rationale panel
       PromptComposer.tsx paperclip + drag-drop + paste + thumbnail
-      PromptHistory.tsx jobs sidebar with delete
+      PromptHistory.tsx jobs sidebar with delete + horizontal collapse
       LineageBreadcrumb.tsx
-      PipelineProgress.tsx
+      PipelineProgress.tsx 8-stage timeline + horizontal collapse
       RefinePanel.tsx
       PublicViewer.tsx  /p/:id read-only viewer
       Logo.tsx
@@ -313,5 +319,6 @@ Make sure your Supabase **Authentication → URL configuration** lists the Railw
 - The autorouter is intentionally simple. If a route can't fit, it falls back to a ratsnest line and the pipeline keeps going. Run real DRC in KiCad before sending to fab.
 - The KiCad export is **schematic only** (no `.kicad_pcb`). Open `.kicad_sch` directly with `File → Open` — KiCad will offer to create a `.kicad_pro` for you.
 - Cost estimates assume a 100×100 mm 2-layer board and one-side SMT. Real JLCPCB pricing scales with size, layer count, and finish — treat the number as a "good enough for go/no-go" figure, not a final quote.
+- Generated firmware is a single-file Arduino `.ino` only — no PlatformIO `platformio.ini`, no ESP-IDF / STM32 HAL native projects, no editing inside the tab. The sketch is meant as a starting point you flash, verify, and grow.
 - Public viewers can only see; they can't download artifacts. There's no "unshare from the UI" yet — call `POST /api/jobs/{id}/unpublish` directly if you need to revoke a link.
 - Refinements are text-only. Image-driven refinement is a TODO.

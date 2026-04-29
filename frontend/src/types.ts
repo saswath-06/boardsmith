@@ -133,6 +133,18 @@ export interface BomData {
   };
 }
 
+export interface FirmwareData {
+  /** The actual .ino source. Null when no MCU was detected and the stage was skipped. */
+  code: string | null;
+  filename?: string;
+  target_board?: string;
+  framework?: string;
+  summary?: string;
+  /** Reason field — set when code is null (e.g. "no MCU in design"). */
+  reason?: string;
+  artifacts?: { firmware_ino?: string };
+}
+
 // UI-side log line shape used inside PipelineProgress.
 export interface LogEntry {
   level: "info" | "ok" | "warn" | "err";
