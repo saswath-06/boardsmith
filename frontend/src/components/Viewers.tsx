@@ -520,29 +520,54 @@ const ViewerTabs = ({ data, schematic, gerber, bom, jobId }: ViewerTabsProps) =>
       {/* footer */}
       <ViewerFooter data={data} />
 
-      {/* KiCad schematic download */}
+      {/* Schematic actions: simulate in browser + KiCad export */}
       {kicadHref && (
         <div className="flex items-center gap-3 px-4 py-2.5 border-t"
           style={{ borderColor: "var(--bs-line-soft)", background: "var(--bs-panel-2)" }}>
           <span className="bs-pill" style={{ color: "var(--bs-copper)" }}>
             <span className="h-1.5 w-1.5 rounded-full" style={{ background: "var(--bs-copper)" }}/>
-            KiCad
+            Schematic
           </span>
           <div className="flex-1 min-w-0">
             <div className="text-[13px] font-medium truncate" style={{ color: "var(--bs-fg)" }}>
-              KiCad schematic · {kicadFilename}
+              {schematic?.simulate_url
+                ? `Live SPICE simulation ready · ${kicadFilename}`
+                : `KiCad schematic · ${kicadFilename}`}
             </div>
-            <div className="font-mono text-[10px]" style={{ color: "var(--bs-fg-dim)" }}>
-              lib_symbols · wires · net labels · A4 paper
+            <div className="font-mono text-[10px] truncate" style={{ color: "var(--bs-fg-dim)" }}>
+              {schematic?.simulate_url && schematic?.simulate_summary
+                ? `Falstad: ${schematic.simulate_summary.simulatable_count ?? 0}/${schematic.simulate_summary.total_components ?? 0} parts modeled · ${(schematic.simulate_summary.supply_voltage ?? 5).toFixed(1)}V supply${
+                    (schematic.simulate_summary.skipped_refs ?? []).length > 0
+                      ? ` · skipped ${(schematic.simulate_summary.skipped_refs ?? []).join(", ")}`
+                      : ""
+                  }`
+                : schematic?.simulate_summary?.reason
+                ? schematic.simulate_summary.reason
+                : "lib_symbols · wires · net labels · A4 paper"}
             </div>
           </div>
           <a href={kicadHref} download={kicadFilename}
-            className="bs-btn-primary px-4 py-2 rounded text-[13px] flex items-center gap-2 no-underline">
+            className="bs-btn-ghost px-3 py-2 rounded text-[12px] flex items-center gap-2 no-underline"
+            title="Download KiCad-compatible .kicad_sch schematic">
             <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
               <path d="M8 2v8m0 0l-3-3m3 3l3-3M3 13h10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
-            Download
+            KiCad
           </a>
+          {schematic?.simulate_url && (
+            <a
+              href={schematic.simulate_url}
+              target="_blank"
+              rel="noreferrer"
+              className="bs-btn-primary px-4 py-2 rounded text-[13px] flex items-center gap-2 no-underline"
+              title="Open the circuit running live in Falstad — animated current flow, LEDs light up by current"
+            >
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+                <path d="M5 3l8 5-8 5V3z" fill="currentColor"/>
+              </svg>
+              Simulate
+            </a>
+          )}
         </div>
       )}
 

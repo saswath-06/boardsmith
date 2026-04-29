@@ -7,6 +7,7 @@ from typing import Any, Awaitable, Callable
 
 from app.bom import build_bom, write_bom_csv, write_jlcpcb_csv
 from app.cpl import write_cpl_csv
+from app.falstad import circuit_to_falstad, falstad_simulate_url, simulation_summary
 from app.gerber import write_gerber_zip
 from app.kicad_writer import write_kicad_schematic
 from app.llm import (
@@ -117,11 +118,27 @@ async def _run_downstream(job: JobRecord, design: CircuitDesign) -> None:
     async def schematic_action() -> dict[str, Any]:
         svg_path = job.output_dir / "schematic.svg"
         kicad_path = job.output_dir / f"{project_name}.kicad_sch"
+        falstad_path = job.output_dir / f"{project_name}_falstad.txt"
         svg = write_schematic_svg(design, svg_path)
         write_kicad_schematic(design, kicad_path, project_name=project_name)
         STORE.add_artifact(job.job_id, "schematic_svg", svg_path)
         STORE.add_artifact(job.job_id, "kicad_schematic", kicad_path)
-        return {
+
+        # Falstad export: text artifact + (optional) one-click simulate URL.
+        # URL is suppressed when the design has nothing Falstad can model
+        # (MCU-only / sensor-only boards) so the button doesn't open into a
+        # broken short-circuit simulation.
+        sim_url: str | None = None
+        sim_summary: dict[str, Any] = {}
+        try:
+            sim_url, sim_text = falstad_simulate_url(design)
+            falstad_path.write_text(sim_text, encoding="utf-8")
+            STORE.add_artifact(job.job_id, "falstad_txt", falstad_path)
+            sim_summary = simulation_summary(design)
+        except Exception as exc:  # noqa: BLE001
+            sim_summary = {"error": str(exc)}
+
+        payload: dict[str, Any] = {
             "svg": svg,
             "kicad_filename": f"{project_name}.kicad_sch",
             "artifacts": {
@@ -129,6 +146,14 @@ async def _run_downstream(job: JobRecord, design: CircuitDesign) -> None:
                 "kicad_schematic": f"/api/jobs/{job.job_id}/artifact/kicad_schematic",
             },
         }
+        if sim_summary:
+            payload["simulate_summary"] = sim_summary
+        if sim_url:
+            payload["simulate_url"] = sim_url
+            payload["artifacts"]["falstad_txt"] = (
+                f"/api/jobs/{job.job_id}/artifact/falstad_txt"
+            )
+        return payload
 
     await _safe_stage(
         job,

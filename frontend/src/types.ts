@@ -62,6 +62,18 @@ export interface SchematicData {
   artifacts?: Record<string, string>;
   /** Display/download name for KiCad schematic (matches backend slugged project name). */
   kicad_filename?: string;
+  /** One-click Falstad URL — opens the circuit running in a browser simulator. */
+  simulate_url?: string;
+  /** Quick stats about what's simulatable (counts, supply voltage, skipped refs). */
+  simulate_summary?: {
+    supply_voltage?: number;
+    simulatable_count?: number;
+    total_components?: number;
+    skipped_refs?: string[];
+    ok?: boolean;
+    reason?: string | null;
+    error?: string;
+  };
 }
 
 export interface GerberData {

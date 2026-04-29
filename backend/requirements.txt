@@ -6,3 +6,4 @@ google-genai
 schemdraw
 asyncpg
 python-jose[cryptography]
+lzstring
