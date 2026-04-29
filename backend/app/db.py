@@ -36,11 +36,19 @@ CREATE TABLE IF NOT EXISTS jobs (
     artifacts_index JSONB       NOT NULL DEFAULT '{}'::jsonb
 );
 
+-- Forward-compatible additive migrations. Wrapped in IF NOT EXISTS so
+-- they're idempotent across redeploys.
+ALTER TABLE jobs
+    ADD COLUMN IF NOT EXISTS is_public BOOLEAN NOT NULL DEFAULT FALSE;
+
 CREATE INDEX IF NOT EXISTS jobs_user_idx
     ON jobs(user_id, created_at DESC);
 
 CREATE INDEX IF NOT EXISTS jobs_parent_idx
     ON jobs(parent_job_id);
+
+CREATE INDEX IF NOT EXISTS jobs_public_idx
+    ON jobs(job_id) WHERE is_public = TRUE;
 """
 
 

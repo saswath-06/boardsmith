@@ -203,6 +203,30 @@ def _followup_if_needed(client: Any, design: CircuitDesign, description: str) ->
     return design
 
 
+def _vision_prompt_addendum() -> str:
+    """Extra rules layered on top of ``_system_prompt`` when an image is supplied."""
+    return """
+
+The user has attached a hand-drawn schematic, breadboard photo, or sketch.
+Extract every visible component and connection.
+
+- Identify components by their drawn or photographed appearance: resistors
+  (zigzags or color bands), LEDs (triangle+line or visible LED package),
+  capacitors (parallel lines), buttons, MCUs (chip with labeled pins),
+  sensors, headers, etc. Match each one to the closest allowed component
+  type.
+- Read any visible value/label text near a part (e.g. "330R", "10uF",
+  "ESP32") and copy it into the value field.
+- Trace wires/jumpers between components to build the nets list. Power
+  rails on the breadboard sides become the GND and power nets.
+- If accompanying text was provided, use it as additional guidance —
+  e.g. "ignore the buzzer" or "this is a 3.3V design". Otherwise infer
+  voltages from visible components (USB-C → 5V, LiPo → 3.7V, etc.).
+- If the image is ambiguous or low-resolution for a part, pick the most
+  likely supported type and add a warning naming what was uncertain.
+"""
+
+
 def parse_with_gemini(description: str) -> CircuitDesign:
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
@@ -261,6 +285,77 @@ def parse_with_gemini(description: str) -> CircuitDesign:
         flush=True,
     )
     return _followup_if_needed(client, design, description)
+
+
+def parse_with_gemini_vision(
+    image_bytes: bytes,
+    mime_type: str,
+    description: str | None = None,
+) -> CircuitDesign:
+    """Vision-aware parse: image (sketch/photo) + optional text instructions.
+
+    Sends both the image and the text in the same Gemini request so the
+    model can cross-reference visible components with any user
+    annotations.
+    """
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise RuntimeError("GEMINI_API_KEY is not set")
+    try:
+        from google import genai
+        from google.genai import types
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError(f"google-genai is unavailable: {exc}") from exc
+
+    client = genai.Client(api_key=api_key)
+    image_part = types.Part.from_bytes(data=image_bytes, mime_type=mime_type)
+    user_text = (
+        description.strip()
+        if description and description.strip()
+        else "Extract the circuit shown in the attached image."
+    )
+    contents = [image_part, user_text]
+
+    system_instruction = _system_prompt() + _vision_prompt_addendum()
+
+    response = client.models.generate_content(
+        model=MODEL,
+        contents=contents,
+        config=types.GenerateContentConfig(
+            system_instruction=system_instruction,
+            response_mime_type="application/json",
+            max_output_tokens=32768,
+        ),
+    )
+    raw = response.text or ""
+    print(
+        f"[boardsmith.llm.vision] raw response: {len(raw)} chars "
+        f"(image={len(image_bytes)} bytes, mime={mime_type})",
+        flush=True,
+    )
+
+    try:
+        _DEBUG_DIR.mkdir(parents=True, exist_ok=True)
+        idx = len(list(_DEBUG_DIR.glob("vision_*.json")))
+        (_DEBUG_DIR / f"vision_{idx:03d}.json").write_text(raw, encoding="utf-8")
+    except Exception:  # noqa: BLE001
+        pass
+
+    data = _extract_json(raw)
+    print(
+        f"[boardsmith.llm.vision] extracted JSON: "
+        f"{len(data.get('components', []))} components, "
+        f"{len(data.get('nets', []))} nets",
+        flush=True,
+    )
+
+    design = CircuitDesign.model_validate(data)
+    print(
+        f"[boardsmith.llm.vision] parsed: {len(design.components)} components, "
+        f"{len(design.nets)} nets, {len(design.warnings)} warnings",
+        flush=True,
+    )
+    return design
 
 
 def fallback_design(description: str, reason: str | None = None) -> CircuitDesign:
@@ -381,11 +476,36 @@ def fallback_design(description: str, reason: str | None = None) -> CircuitDesig
     )
 
 
-def parse_circuit_description(description: str) -> CircuitDesign:
+def parse_circuit_description(
+    description: str,
+    *,
+    image_bytes: bytes | None = None,
+    mime_type: str | None = None,
+) -> CircuitDesign:
+    """Parse a user prompt into a CircuitDesign.
+
+    If ``image_bytes`` is supplied we route through the vision-aware
+    parser; ``description`` is passed alongside as optional context. The
+    fallback path is text-only because the rule-based fallback can't
+    interpret pixels.
+    """
+    use_vision = image_bytes is not None and mime_type
     try:
-        design = parse_with_gemini(description)
+        if use_vision:
+            design = parse_with_gemini_vision(
+                image_bytes,  # type: ignore[arg-type]
+                mime_type,    # type: ignore[arg-type]
+                description,
+            )
+        else:
+            design = parse_with_gemini(description)
     except Exception as exc:  # noqa: BLE001
-        print(f"[boardsmith.llm] Gemini parse FAILED — using fallback. Reason: {exc}", flush=True)
+        path = "vision" if use_vision else "text"
+        print(
+            f"[boardsmith.llm] Gemini {path} parse FAILED — using fallback. "
+            f"Reason: {exc}",
+            flush=True,
+        )
         return fallback_design(description, str(exc))
     if not design.components or not design.nets:
         print(

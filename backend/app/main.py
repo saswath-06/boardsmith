@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 
@@ -16,7 +16,6 @@ from app.db import close_pool, init_pool
 from app.models import (
     CircuitDesign,
     JobCreateResponse,
-    JobRequest,
     JobSnapshot,
     JobSummary,
     LineageEntry,
@@ -65,9 +64,55 @@ async def health() -> dict[str, bool]:
     return {"ok": True}
 
 
+_ALLOWED_IMAGE_MIMES = {"image/png", "image/jpeg", "image/webp", "image/gif"}
+_MAX_IMAGE_BYTES = 10 * 1024 * 1024  # 10 MB; Gemini Vision handles up to ~20MB
+
+
 @app.post("/api/jobs", response_model=JobCreateResponse)
-async def create_job(request: JobRequest, user: CurrentUser) -> JobCreateResponse:
-    job = await STORE.create(user.user_id, request.description)
+async def create_job(
+    user: CurrentUser,
+    description: str = Form(""),
+    image: UploadFile | None = File(None),
+) -> JobCreateResponse:
+    """Create a new job. Accepts text-only, image-only, or image+text.
+
+    The endpoint is multipart/form-data so the optional image can be
+    streamed without base64 overhead. At least one of ``description`` or
+    ``image`` must be provided.
+    """
+    desc = (description or "").strip()
+    image_bytes: bytes | None = None
+    image_mime: str | None = None
+
+    if image is not None and image.filename:
+        if image.content_type not in _ALLOWED_IMAGE_MIMES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"unsupported image type: {image.content_type}",
+            )
+        image_bytes = await image.read()
+        if not image_bytes:
+            raise HTTPException(status_code=400, detail="image file is empty")
+        if len(image_bytes) > _MAX_IMAGE_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"image too large (>{_MAX_IMAGE_BYTES // (1024 * 1024)} MB)",
+            )
+        image_mime = image.content_type
+
+    if not desc and image_bytes is None:
+        raise HTTPException(
+            status_code=400,
+            detail="provide a text description, an image, or both",
+        )
+
+    # Persisted description: use the text if present, otherwise a short
+    # placeholder so the sidebar has something readable.
+    persisted_desc = desc or f"Sketch upload ({image_mime or 'image'})"
+
+    job = await STORE.create(user.user_id, persisted_desc)
+    job.image_bytes = image_bytes
+    job.image_mime = image_mime
     asyncio.create_task(run_pipeline(job))
     return JobCreateResponse(job_id=job.job_id)
 
@@ -105,6 +150,46 @@ async def delete_job(job_id: str, user: CurrentUser) -> dict[str, list[str]]:
     except KeyError:
         raise HTTPException(status_code=404, detail="job not found") from None
     return {"deleted": deleted}
+
+
+@app.post("/api/jobs/{job_id}/publish")
+async def publish_job(job_id: str, user: CurrentUser) -> dict[str, object]:
+    """Mark a job as publicly shareable.
+
+    The caller must own the job. Returns the relative share URL the
+    frontend should copy to the clipboard.
+    """
+    try:
+        await STORE.mark_public(user.user_id, job_id, True)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="job not found") from None
+    return {"public": True, "share_url": f"/p/{job_id}"}
+
+
+@app.post("/api/jobs/{job_id}/unpublish")
+async def unpublish_job(job_id: str, user: CurrentUser) -> dict[str, object]:
+    """Revoke a public share link."""
+    try:
+        await STORE.mark_public(user.user_id, job_id, False)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="job not found") from None
+    return {"public": False}
+
+
+@app.get("/api/public/jobs/{job_id}", response_model=JobSnapshot)
+async def get_public_job(job_id: str) -> JobSnapshot:
+    """Anonymous read-only access to a publicly-shared job.
+
+    No auth required. The server only returns snapshots for jobs whose
+    ``is_public`` flag is set; artifact URLs are stripped because the
+    public viewer is intentionally view-only.
+    """
+    snapshot = await STORE.public_snapshot(job_id)
+    if snapshot is None:
+        raise HTTPException(
+            status_code=404, detail="job not found or not shared"
+        )
+    return snapshot
 
 
 @app.post("/api/jobs/{parent_id}/refine", response_model=JobCreateResponse)

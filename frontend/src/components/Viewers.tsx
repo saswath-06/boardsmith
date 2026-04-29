@@ -119,7 +119,29 @@ export const SchematicViewer = ({ svg }: SchematicViewerProps) => {
 // ── BOM viewer — bill-of-materials table.
 interface BomViewerProps {
   bom: BomData | null;
+  readOnly?: boolean;
 }
+
+interface CostLineProps {
+  label: string;
+  value: number;
+  hint?: string;
+}
+
+const CostLine = ({ label, value, hint }: CostLineProps) => (
+  <div className="flex items-baseline gap-3 py-0.5">
+    <span style={{ color: "var(--bs-fg)" }}>{label}</span>
+    {hint && (
+      <span className="text-[10px]" style={{ color: "var(--bs-fg-dim)" }}>
+        {hint}
+      </span>
+    )}
+    <span className="ml-auto" />
+    <span className="tabular-nums" style={{ color: "var(--bs-fg-mute)" }}>
+      ${value.toFixed(2)}
+    </span>
+  </div>
+);
 
 const CATEGORY_BADGE: Record<string, string> = {
   microcontroller: "var(--bs-cyan)",
@@ -130,7 +152,11 @@ const CATEGORY_BADGE: Record<string, string> = {
   connector:       "var(--bs-copper)",
 };
 
-export const BomViewer = ({ bom }: BomViewerProps) => {
+export const BomViewer = ({ bom, readOnly = false }: BomViewerProps) => {
+  const estimates = bom?.cost_estimates ?? [];
+  const defaultQty = estimates[0]?.qty ?? 5;
+  const [selectedQty, setSelectedQty] = useState<number>(defaultQty);
+
   if (!bom) return <div className="bs-skeleton h-full w-full" />;
   if (!bom.lines.length) {
     return (
@@ -149,6 +175,9 @@ export const BomViewer = ({ bom }: BomViewerProps) => {
     typeof bom.total_unit_cost_usd === "number" && bom.total_unit_cost_usd > 0
       ? bom.total_unit_cost_usd
       : null;
+
+  const activeEstimate =
+    estimates.find((e) => e.qty === selectedQty) ?? estimates[0] ?? null;
 
   return (
     <div className="h-full w-full overflow-auto bs-scroll" style={{ background: "var(--bs-bg)" }}>
@@ -182,19 +211,13 @@ export const BomViewer = ({ bom }: BomViewerProps) => {
           {totalCost !== null && (
             <>
               <span style={{ color: "var(--bs-line)" }}>·</span>
-              <span style={{ color: "var(--bs-fg-dim)" }}>UNIT COST</span>
+              <span style={{ color: "var(--bs-fg-dim)" }}>PARTS / BOARD</span>
               <span
                 className="text-[15px] font-semibold"
                 style={{ color: "var(--bs-copper)" }}
                 title={`${bom.priced_line_count ?? 0}/${bom.total_unique} lines priced`}
               >
                 ${totalCost.toFixed(2)}
-              </span>
-              <span
-                className="font-mono text-[10px] uppercase tracking-widest"
-                style={{ color: "var(--bs-fg-dim)" }}
-              >
-                10× ${(totalCost * 10).toFixed(2)} · 100× ${(totalCost * 100).toFixed(2)}
               </span>
             </>
           )}
@@ -207,8 +230,110 @@ export const BomViewer = ({ bom }: BomViewerProps) => {
         </span>
       </div>
 
+      {/* All-in build cost breakdown (parts + JLCPCB fab + assembly) */}
+      {activeEstimate && (
+        <div
+          className="mx-4 my-3 rounded overflow-hidden"
+          style={{
+            background: "var(--bs-panel)",
+            border: "1px solid var(--bs-line-soft)",
+          }}
+        >
+          <div
+            className="flex items-center gap-2 px-4 py-2.5 border-b"
+            style={{ borderColor: "var(--bs-line-soft)" }}
+          >
+            <span
+              className="font-mono text-[10px] uppercase tracking-widest"
+              style={{ color: "var(--bs-fg-dim)" }}
+            >
+              All-in build estimate
+            </span>
+            <span style={{ color: "var(--bs-line)" }}>·</span>
+            <div className="flex items-center gap-1">
+              {estimates.map((est) => {
+                const isActive = est.qty === activeEstimate.qty;
+                return (
+                  <button
+                    key={est.qty}
+                    onClick={() => setSelectedQty(est.qty)}
+                    className="px-2.5 py-1 rounded font-mono text-[11px] transition-colors"
+                    style={{
+                      background: isActive ? "var(--bs-copper)" : "transparent",
+                      color: isActive ? "var(--bs-bg)" : "var(--bs-fg-mute)",
+                      border: `1px solid ${isActive ? "var(--bs-copper)" : "var(--bs-line-soft)"}`,
+                    }}
+                  >
+                    {est.qty} boards
+                  </button>
+                );
+              })}
+            </div>
+            <span
+              className="ml-auto font-mono text-[10px]"
+              style={{ color: "var(--bs-fg-dim)" }}
+            >
+              JLCPCB · 100×100 mm 2-layer · 1 side SMT
+            </span>
+          </div>
+          <div className="px-4 py-3 font-mono text-[12px]">
+            <CostLine
+              label={`Parts (${activeEstimate.qty}× × 1.05 buffer)`}
+              value={activeEstimate.parts}
+            />
+            <CostLine
+              label={`PCB fabrication (${activeEstimate.qty} boards)`}
+              value={activeEstimate.pcb_fab}
+            />
+            {activeEstimate.smt_setup > 0 && (
+              <CostLine
+                label="SMT setup + stencil"
+                value={activeEstimate.smt_setup + activeEstimate.stencil}
+                hint={`$${activeEstimate.smt_setup.toFixed(2)} setup + $${activeEstimate.stencil.toFixed(2)} stencil`}
+              />
+            )}
+            {activeEstimate.smt_placement > 0 && (
+              <CostLine
+                label={`Component placement (${activeEstimate.smt_joints} joints × ${activeEstimate.qty})`}
+                value={activeEstimate.smt_placement}
+                hint="$0.0017 per joint"
+              />
+            )}
+            <CostLine
+              label="Shipping (DHL economy estimate)"
+              value={activeEstimate.shipping}
+            />
+            <div
+              className="my-2 border-t"
+              style={{ borderColor: "var(--bs-line-soft)" }}
+            />
+            <div className="flex items-baseline gap-3">
+              <span
+                className="text-[12px] uppercase tracking-wider"
+                style={{ color: "var(--bs-fg-dim)" }}
+              >
+                All-in build
+              </span>
+              <span className="ml-auto" />
+              <span
+                className="text-[10px]"
+                style={{ color: "var(--bs-fg-dim)" }}
+              >
+                ${(activeEstimate.total / activeEstimate.qty).toFixed(2)}/board
+              </span>
+              <span
+                className="text-[18px] font-semibold tabular-nums"
+                style={{ color: "var(--bs-copper)" }}
+              >
+                ${activeEstimate.total.toFixed(2)}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* JLCPCB call-to-action — only when we have at least one LCSC match */}
-      {matched > 0 && (
+      {matched > 0 && !readOnly && (
         <div
           className="mx-4 my-3 px-4 py-3 rounded flex items-start gap-3"
           style={{
@@ -462,9 +587,13 @@ interface ViewerTabsProps {
   gerber: GerberData | null;
   bom: BomData | null;
   jobId: string | null;
+  /** When true, hide all download/simulate/KiCad action bars. Used by
+   *  the public-share viewer so anonymous visitors can browse but not
+   *  pull manufacturing artifacts. */
+  readOnly?: boolean;
 }
 
-const ViewerTabs = ({ data, schematic, gerber, bom, jobId }: ViewerTabsProps) => {
+const ViewerTabs = ({ data, schematic, gerber, bom, jobId, readOnly = false }: ViewerTabsProps) => {
   const [active, setActive] = useState<TabId>("3d");
   const { session } = useAuth();
   const token = session?.access_token ?? null;
@@ -514,14 +643,14 @@ const ViewerTabs = ({ data, schematic, gerber, bom, jobId }: ViewerTabsProps) =>
         <div className={`absolute inset-0 ${active === "3d" ? "block" : "hidden"}`}><Board3DViewer data={data}/></div>
         <div className={`absolute inset-0 ${active === "pcb" ? "block" : "hidden"}`}><PcbLayoutViewer data={data}/></div>
         <div className={`absolute inset-0 ${active === "schematic" ? "block" : "hidden"}`}><SchematicViewer svg={schematic?.svg}/></div>
-        <div className={`absolute inset-0 ${active === "bom" ? "block" : "hidden"}`}><BomViewer bom={bom}/></div>
+        <div className={`absolute inset-0 ${active === "bom" ? "block" : "hidden"}`}><BomViewer bom={bom} readOnly={readOnly}/></div>
       </div>
 
       {/* footer */}
       <ViewerFooter data={data} />
 
       {/* Schematic actions: simulate in browser + KiCad export */}
-      {kicadHref && (
+      {!readOnly && kicadHref && (
         <div className="flex items-center gap-3 px-4 py-2.5 border-t"
           style={{ borderColor: "var(--bs-line-soft)", background: "var(--bs-panel-2)" }}>
           <span className="bs-pill" style={{ color: "var(--bs-copper)" }}>
@@ -572,7 +701,7 @@ const ViewerTabs = ({ data, schematic, gerber, bom, jobId }: ViewerTabsProps) =>
       )}
 
       {/* BOM download bar */}
-      {bom && bom.lines.length > 0 && bomCsvHref && (
+      {!readOnly && bom && bom.lines.length > 0 && bomCsvHref && (
         <div
           className="flex items-center gap-3 px-4 py-2.5 border-t"
           style={{ borderColor: "var(--bs-line-soft)", background: "var(--bs-panel-2)" }}
@@ -650,7 +779,7 @@ const ViewerTabs = ({ data, schematic, gerber, bom, jobId }: ViewerTabsProps) =>
       )}
 
       {/* manufacturing bundle download bar — Gerbers + BOMs + CPL all-in-one */}
-      {gerber && gerber.download_url && (
+      {!readOnly && gerber && gerber.download_url && (
         <div className="flex items-center gap-3 px-4 py-2.5 border-t"
           style={{ borderColor: "var(--bs-line-soft)", background: "var(--bs-panel-2)" }}>
           <span className="bs-pill" style={{ color: "var(--bs-lime)" }}>

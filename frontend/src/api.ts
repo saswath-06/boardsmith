@@ -19,12 +19,17 @@ async function authFetch(path: string, init: RequestInit = {}): Promise<Response
   return fetch(`${API_URL}${path}`, { ...init, headers });
 }
 
-export async function createJob(description: string): Promise<CreateJobResponse> {
-  const res = await authFetch(`/api/jobs`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ description }),
-  });
+export async function createJob(
+  description: string,
+  image?: File | null,
+): Promise<CreateJobResponse> {
+  // multipart/form-data so an optional sketch/photo can be attached. We
+  // intentionally don't set Content-Type — the browser fills in the
+  // multipart boundary parameter automatically when given a FormData.
+  const form = new FormData();
+  form.set("description", description ?? "");
+  if (image) form.set("image", image, image.name);
+  const res = await authFetch(`/api/jobs`, { method: "POST", body: form });
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`Failed to create job: ${res.status} ${text}`);
@@ -76,6 +81,27 @@ export async function deleteJob(jobId: string): Promise<string[]> {
   }
   const body = (await res.json()) as { deleted: string[] };
   return body.deleted ?? [];
+}
+
+export async function publishJob(
+  jobId: string,
+): Promise<{ public: boolean; share_url: string }> {
+  const res = await authFetch(`/api/jobs/${jobId}/publish`, { method: "POST" });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Failed to publish job: ${res.status} ${text}`);
+  }
+  return (await res.json()) as { public: boolean; share_url: string };
+}
+
+export async function getPublicJob(jobId: string): Promise<JobSnapshot> {
+  // No auth — the backend gates on the job's is_public flag.
+  const res = await fetch(`${API_URL}/api/public/jobs/${jobId}`);
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Failed to fetch public job: ${res.status} ${text}`);
+  }
+  return (await res.json()) as JobSnapshot;
 }
 
 /** Open an SSE stream for a job. EventSource can't set headers, so we

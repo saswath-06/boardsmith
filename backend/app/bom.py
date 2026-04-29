@@ -12,8 +12,9 @@ import re
 from pathlib import Path
 
 from app.component_library import COMPONENT_LIBRARY, normalize_component_type
+from app.cost import compute_estimate_tiers
 from app.lcsc import lookup_lcsc, lookup_unit_price_usd
-from app.models import BomData, BomLine, CircuitDesign
+from app.models import BomData, BomLine, CircuitDesign, CostEstimate
 
 
 def _natural_ref_key(ref: str) -> tuple[str, int, str]:
@@ -60,6 +61,26 @@ def _category_for(comp_type: str) -> str:
     normalized = normalize_component_type(comp_type)
     library = COMPONENT_LIBRARY.get(normalized) if normalized else None
     return library.category if library else "other"
+
+
+def _smt_joints_for(comp_type: str) -> int:
+    """Pad count if this part is SMT-assembled by JLCPCB, else 0.
+
+    Through-hole connectors/headers and dev modules don't get the
+    per-joint placement fee — they're hand-soldered or pre-assembled.
+    """
+    normalized = normalize_component_type(comp_type)
+    library = COMPONENT_LIBRARY.get(normalized) if normalized else None
+    if not library:
+        return 0
+    fp = library.footprint
+    if fp.startswith("Module:") or fp.startswith("Sensor:"):
+        return 0
+    if "PinHeader" in fp or "JST_XH" in fp:
+        return 0
+    if "_SMD" in fp or "SOT-" in fp or "USB_C_Receptacle" in fp:
+        return len(library.pins)
+    return 0
 
 
 def build_bom(design: CircuitDesign) -> BomData:
@@ -126,6 +147,16 @@ def build_bom(design: CircuitDesign) -> BomData:
     priced = [ln for ln in lines if ln.extended_price_usd is not None]
     total_unit_cost = round(sum(ln.extended_price_usd or 0.0 for ln in priced), 2)
 
+    # SMT joints across the BOM = sum of (pads * quantity) for SMT parts.
+    smt_joints = sum(
+        _smt_joints_for(line.type) * line.quantity for line in lines
+    )
+
+    estimates = [
+        CostEstimate(**est)
+        for est in compute_estimate_tiers(total_unit_cost, smt_joints)
+    ]
+
     return BomData(
         project_name=design.project_name,
         lines=lines,
@@ -134,6 +165,8 @@ def build_bom(design: CircuitDesign) -> BomData:
         total_unit_cost_usd=total_unit_cost,
         priced_line_count=len(priced),
         currency="USD",
+        smt_joints=smt_joints,
+        cost_estimates=estimates,
     )
 
 

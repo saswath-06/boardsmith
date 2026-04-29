@@ -100,6 +100,18 @@ export interface BomLine {
   extended_price_usd?: number | null;
 }
 
+export interface CostEstimate {
+  qty: number;
+  parts: number;
+  pcb_fab: number;
+  smt_setup: number;
+  smt_placement: number;
+  stencil: number;
+  shipping: number;
+  total: number;
+  smt_joints: number;
+}
+
 export interface BomData {
   project_name: string;
   lines: BomLine[];
@@ -108,6 +120,8 @@ export interface BomData {
   total_unit_cost_usd?: number;
   priced_line_count?: number;
   currency?: string;
+  smt_joints?: number;
+  cost_estimates?: CostEstimate[];
   artifacts?: {
     bom_csv?: string;
     bom_jlcpcb_csv?: string;

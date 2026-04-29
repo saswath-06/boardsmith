@@ -56,6 +56,11 @@ class JobRecord:
         self.artifacts: dict[str, Path] = {}
         self.complete = False
         self.condition = asyncio.Condition()
+        # Optional image attached to the initial prompt (sketch, breadboard
+        # photo, etc.). Held in memory only; the LLM consumes it at parse
+        # time and we don't need to persist it for refinement.
+        self.image_bytes: bytes | None = None
+        self.image_mime: str | None = None
 
     def title(self) -> str:
         if self.revision and self.instruction:
@@ -464,6 +469,63 @@ class JobStore:
             user_id,
         )
         return row is not None
+
+    # ── public sharing ───────────────────────────────────────────────────
+
+    async def mark_public(
+        self, user_id: str, job_id: str, public: bool
+    ) -> bool:
+        """Toggle the ``is_public`` flag on a job the caller owns.
+
+        Returns ``True`` on success, raises ``KeyError`` if the job
+        isn't owned by this user.
+        """
+        result = await execute(
+            """
+            UPDATE jobs
+            SET is_public  = $3,
+                updated_at = NOW()
+            WHERE job_id = $1 AND user_id = $2
+            """,
+            job_id,
+            user_id,
+            public,
+        )
+        # asyncpg returns "UPDATE n" — n=0 means no row matched.
+        if result.endswith(" 0"):
+            raise KeyError(f"job {job_id} not found for user")
+        return public
+
+    async def public_snapshot(self, job_id: str) -> JobSnapshot | None:
+        """Read the snapshot for a publicly-shared job (no auth required).
+
+        Returns ``None`` if the job doesn't exist or isn't public.
+        Artifact URLs are intentionally stripped so anonymous viewers
+        can render the visualization without being able to download
+        manufacturing files.
+        """
+        row = await fetch_one(
+            """
+            SELECT job_id, description, parent_job_id, instruction, revision,
+                   complete, created_at, events_json, artifacts_index, design_json
+            FROM jobs
+            WHERE job_id = $1 AND is_public = TRUE
+            """,
+            job_id,
+        )
+        if row is None:
+            return None
+        snapshot = _row_to_snapshot(row, {})
+        # Drop artifact URLs entirely — view-only.
+        snapshot.artifacts = []
+        return snapshot
+
+    async def is_public(self, job_id: str) -> bool:
+        row = await fetch_one(
+            "SELECT is_public FROM jobs WHERE job_id = $1",
+            job_id,
+        )
+        return bool(row and row["is_public"])
 
 
 STORE = JobStore()

@@ -68,12 +68,24 @@ async def _persist_design(job: JobRecord, design: CircuitDesign) -> CircuitDesig
 async def run_pipeline(job: JobRecord) -> None:
     """Initial generation pipeline: parse → schematic → PCB → routing → 3D → Gerber."""
     try:
+        has_image = job.image_bytes is not None and job.image_mime is not None
+        running_msg = (
+            "Parsing attached sketch/photo with Gemini Vision."
+            if has_image
+            else "Parsing natural language into supported components and nets."
+        )
         design = await _safe_stage(
             job,
             "parse",
-            "Parsing natural language into supported components and nets.",
+            running_msg,
             "Circuit JSON generated.",
-            lambda: _async_value(parse_circuit_description(job.description)),
+            lambda: _async_value(
+                parse_circuit_description(
+                    job.description,
+                    image_bytes=job.image_bytes,
+                    mime_type=job.image_mime,
+                )
+            ),
             lambda exc: fallback_design(job.description, str(exc)),
         )
         design = await _persist_design(job, design)

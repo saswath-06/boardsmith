@@ -92,6 +92,20 @@ class BomLine(BaseModel):
     extended_price_usd: float | None = None
 
 
+class CostEstimate(BaseModel):
+    """All-in build cost for one quantity tier (mirror of cost.CostEstimate)."""
+
+    qty: int
+    parts: float = 0.0
+    pcb_fab: float = 0.0
+    smt_setup: float = 0.0
+    smt_placement: float = 0.0
+    stencil: float = 0.0
+    shipping: float = 0.0
+    total: float = 0.0
+    smt_joints: int = 0
+
+
 class BomData(BaseModel):
     project_name: str
     lines: list[BomLine]
@@ -101,6 +115,12 @@ class BomData(BaseModel):
     total_unit_cost_usd: float = 0.0
     priced_line_count: int = 0
     currency: str = "USD"
+    # SMT joint count (sum of pads on assembled SMT components) — feeds
+    # the per-joint placement fee in the JLCPCB estimator.
+    smt_joints: int = 0
+    # All-in cost tiers (5 / 30 / 100 boards). Each entry is a complete
+    # breakdown the frontend can render without recomputing.
+    cost_estimates: list[CostEstimate] = Field(default_factory=list)
     artifacts: dict[str, str] = Field(default_factory=dict)
 
 

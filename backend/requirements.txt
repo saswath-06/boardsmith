@@ -7,3 +7,4 @@ schemdraw
 asyncpg
 python-jose[cryptography]
 lzstring
+python-multipart

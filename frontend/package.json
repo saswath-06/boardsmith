@@ -20,6 +20,7 @@
     "postcss": "latest",
     "react": "latest",
     "react-dom": "latest",
+    "react-router-dom": "^7.14.2",
     "tailwindcss": "latest",
     "three": "latest",
     "typescript": "latest",

@@ -3,11 +3,14 @@
 // When no project is selected, the center pane shows a welcome / new-project
 // prompt instead of switching to a separate splash screen.
 import { useEffect, useRef, useState } from "react";
+import { Route, Routes } from "react-router-dom";
 import AuthGate from "./components/AuthGate";
 import LineageBreadcrumb from "./components/LineageBreadcrumb";
 import BoardsmithLogo from "./components/Logo";
 import PipelineProgress from "./components/PipelineProgress";
+import PromptComposer from "./components/PromptComposer";
 import PromptHistory from "./components/PromptHistory";
+import PublicViewer from "./components/PublicViewer";
 import RefinePanel from "./components/RefinePanel";
 import ViewerTabs from "./components/Viewers";
 import {
@@ -16,6 +19,7 @@ import {
   getJob,
   getLineage,
   listJobs,
+  publishJob,
   refineJob,
   subscribeToJob,
 } from "./api";
@@ -49,16 +53,45 @@ interface TopBarProps {
   description: string;
   running: boolean;
   jobId: string | null;
+  activeJobId: string | null;
   onSubmit: () => void;
   onDescriptionChange: (value: string) => void;
   onReset: () => void;
 }
 
-const TopBar = ({ description, running, jobId, onSubmit, onDescriptionChange, onReset }: TopBarProps) => {
+const TopBar = ({ description, running, jobId, activeJobId, onSubmit, onDescriptionChange, onReset }: TopBarProps) => {
   const { user, signOut } = useAuth();
   const breadcrumb = jobId ? jobId.slice(0, 8) : "—";
   const initials = (user?.email ?? "?").slice(0, 2).toUpperCase();
   const avatarUrl = (user?.user_metadata?.avatar_url as string | undefined) ?? null;
+  const [shareState, setShareState] = useState<"idle" | "publishing" | "copied" | "error">(
+    "idle",
+  );
+
+  // Share button is only useful when there's a complete project we can
+  // generate a public link for. Disable it during the build to avoid
+  // sharing half-rendered jobs.
+  const canShare = activeJobId !== null && !running && shareState !== "publishing";
+
+  const handleShare = async () => {
+    if (!activeJobId) return;
+    setShareState("publishing");
+    try {
+      const { share_url } = await publishJob(activeJobId);
+      const fullUrl = `${window.location.origin}${share_url}`;
+      try {
+        await navigator.clipboard.writeText(fullUrl);
+      } catch {
+        // Fallback: still surface the URL even if clipboard write is blocked.
+        window.prompt("Copy this link to share", fullUrl);
+      }
+      setShareState("copied");
+      window.setTimeout(() => setShareState("idle"), 2000);
+    } catch {
+      setShareState("error");
+      window.setTimeout(() => setShareState("idle"), 2000);
+    }
+  };
 
   return (
     <header className="flex items-center gap-4 px-4 h-12 border-b shrink-0"
@@ -102,6 +135,55 @@ const TopBar = ({ description, running, jobId, onSubmit, onDescriptionChange, on
 
       <div className="flex items-center gap-3 shrink-0 font-mono text-[10px] uppercase tracking-wider"
         style={{ color: "var(--bs-fg-dim)" }}>
+        {activeJobId !== null && (
+          <button
+            onClick={() => void handleShare()}
+            disabled={!canShare}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded transition-colors normal-case tracking-normal"
+            style={{
+              border: "1px solid var(--bs-line-soft)",
+              color:
+                shareState === "copied"
+                  ? "var(--bs-lime)"
+                  : shareState === "error"
+                  ? "var(--bs-red)"
+                  : "var(--bs-fg-mute)",
+              background: "var(--bs-bg)",
+              opacity: canShare ? 1 : 0.55,
+              cursor: canShare ? "pointer" : "default",
+            }}
+            onMouseEnter={(e) => {
+              if (!canShare) return;
+              e.currentTarget.style.borderColor = "var(--bs-copper)";
+              e.currentTarget.style.color = "var(--bs-copper-2)";
+            }}
+            onMouseLeave={(e) => {
+              if (shareState !== "idle") return;
+              e.currentTarget.style.borderColor = "var(--bs-line-soft)";
+              e.currentTarget.style.color = "var(--bs-fg-mute)";
+            }}
+            title="Publish a public read-only link to this project"
+          >
+            <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
+              <path
+                d="M11 2.5a2 2 0 11-2 2 2 2 0 012-2zm-6 4.5a2 2 0 11-2 2 2 2 0 012-2zm6 4a2 2 0 11-2 2 2 2 0 012-2zM6.6 7.6l3.3-2M6.6 9.4l3.3 2"
+                stroke="currentColor"
+                strokeWidth="1.4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+            <span className="text-[11px]">
+              {shareState === "publishing"
+                ? "Publishing…"
+                : shareState === "copied"
+                ? "Link copied"
+                : shareState === "error"
+                ? "Share failed"
+                : "Share"}
+            </span>
+          </button>
+        )}
         <span className="flex items-center gap-1.5">
           <span className="h-1.5 w-1.5 rounded-full bs-pulse"
             style={{ background: running ? "var(--bs-cyan)" : "var(--bs-lime)" }}/>
@@ -148,17 +230,21 @@ const TopBar = ({ description, running, jobId, onSubmit, onDescriptionChange, on
 // ── Welcome pane (in-dashboard, shown when no project is selected) ───────
 interface WelcomePaneProps {
   description: string;
+  image: File | null;
   running: boolean;
   hasJobs: boolean;
   onDescriptionChange: (value: string) => void;
+  onImageChange: (file: File | null) => void;
   onSubmit: () => void;
 }
 
 const WelcomePane = ({
   description,
+  image,
   running,
   hasJobs,
   onDescriptionChange,
+  onImageChange,
   onSubmit,
 }: WelcomePaneProps) => {
   const heading = hasJobs ? "Start a new project" : "Describe your first circuit";
@@ -198,41 +284,14 @@ const WelcomePane = ({
           {lede}
         </p>
 
-        <div className="w-full bs-brackets bs-panel p-3" style={{ background: "var(--bs-bg)" }}>
-          <div
-            className="flex items-center gap-2 px-1 pb-2 font-mono text-[10px] uppercase tracking-widest"
-            style={{ color: "var(--bs-fg-dim)" }}
-          >
-            <span style={{ color: "var(--bs-copper)" }}>▍</span>
-            <span>describe.your.circuit</span>
-            <span className="ml-auto">{description.trim().length} chars</span>
-          </div>
-          <textarea
-            value={description}
-            onChange={(e) => onDescriptionChange(e.target.value)}
-            placeholder="An ESP32 connected to a DHT22 temperature sensor, USB-C power input…"
-            className="w-full min-h-[110px] resize-none p-3 outline-none rounded text-[13.5px] leading-[1.55] font-mono"
-            style={{
-              background: "var(--bs-bg-2)",
-              border: "1px solid var(--bs-line-soft)",
-              color: "var(--bs-fg)",
-            }}
-          />
-          <div className="mt-3 flex items-center gap-3">
-            <div className="flex items-center gap-2 font-mono text-[10px]" style={{ color: "var(--bs-fg-dim)" }}>
-              <span style={{ color: "var(--bs-lime)" }}>●</span> gemini-2.5-pro
-              <span style={{ color: "var(--bs-line)" }}>·</span>
-              <span>~10s avg</span>
-            </div>
-            <button
-              onClick={onSubmit}
-              disabled={running || description.trim().length < 3}
-              className="bs-btn-primary ml-auto px-5 py-2.5 rounded flex items-center gap-2 text-[13px]"
-            >
-              {running ? <><span className="bs-spin"/>Building PCB…</> : <>Generate PCB →</>}
-            </button>
-          </div>
-        </div>
+        <PromptComposer
+          description={description}
+          image={image}
+          running={running}
+          onDescriptionChange={onDescriptionChange}
+          onImageChange={onImageChange}
+          onSubmit={onSubmit}
+        />
 
         <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
           <span className="font-mono text-[10px] uppercase tracking-widest" style={{ color: "var(--bs-fg-dim)" }}>
@@ -290,7 +349,7 @@ interface PipelineState {
   bom: BomData | null;
   lineage: LineageEntry[];
   jobsBump: number;
-  start: (description: string) => Promise<void>;
+  start: (description: string, image?: File | null) => Promise<void>;
   refine: (instruction: string) => Promise<void>;
   loadJob: (jobId: string) => Promise<void>;
   reset: () => void;
@@ -472,9 +531,9 @@ function useRealPipeline(): PipelineState {
     sourceRef.current = source;
   };
 
-  const start = async (description: string) => {
+  const start = async (description: string, image?: File | null) => {
     try {
-      const { job_id } = await createJob(description);
+      const { job_id } = await createJob(description, image ?? null);
       await stream(job_id);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -566,19 +625,23 @@ function useRealPipeline(): PipelineState {
 // ── Dashboard: persistent layout with always-visible Jobs sidebar ────────
 interface DashboardProps {
   description: string;
+  image: File | null;
   hasJobs: boolean;
   pipeline: PipelineState;
   onSubmit: () => void;
   onDescriptionChange: (value: string) => void;
+  onImageChange: (file: File | null) => void;
   onNew: () => void;
 }
 
 const Dashboard = ({
   description,
+  image,
   hasJobs,
   pipeline,
   onSubmit,
   onDescriptionChange,
+  onImageChange,
   onNew,
 }: DashboardProps) => {
   const hasProject = pipeline.activeJobId !== null;
@@ -592,6 +655,7 @@ const Dashboard = ({
         description={description}
         running={pipeline.running}
         jobId={pipeline.jobId}
+        activeJobId={pipeline.activeJobId}
         onSubmit={onSubmit}
         onDescriptionChange={onDescriptionChange}
         onReset={onNew}
@@ -650,9 +714,11 @@ const Dashboard = ({
         ) : (
           <WelcomePane
             description={description}
+            image={image}
             running={pipeline.running}
             hasJobs={hasJobs}
             onDescriptionChange={onDescriptionChange}
+            onImageChange={onImageChange}
             onSubmit={onSubmit}
           />
         )}
@@ -665,17 +731,20 @@ const Dashboard = ({
 const AppInner = () => {
   const { session, loading } = useAuth();
   const [description, setDescription] = useState(DEMO_PROMPT);
+  const [image, setImage] = useState<File | null>(null);
   const [hasJobs, setHasJobs] = useState(false);
   const [autoOpened, setAutoOpened] = useState(false);
   const pipeline = useRealPipeline();
 
   const submit = async () => {
-    await pipeline.start(description);
+    await pipeline.start(description, image);
+    setImage(null);
   };
 
   const newProject = () => {
     pipeline.reset();
     setDescription(DEMO_PROMPT);
+    setImage(null);
   };
 
   // Auto-open the most recent project on first sign-in so returning users
@@ -727,10 +796,12 @@ const AppInner = () => {
   return (
     <Dashboard
       description={description}
+      image={image}
       hasJobs={hasJobs}
       pipeline={pipeline}
       onSubmit={submit}
       onDescriptionChange={setDescription}
+      onImageChange={setImage}
       onNew={newProject}
     />
   );
@@ -738,7 +809,13 @@ const AppInner = () => {
 
 const App = () => (
   <AuthProvider>
-    <AppInner />
+    <Routes>
+      {/* Public read-only share view — no auth gate so anyone with the
+          link can see the design. The backend gates on is_public. */}
+      <Route path="/p/:id" element={<PublicViewer />} />
+      {/* Authenticated dashboard for everything else. */}
+      <Route path="*" element={<AppInner />} />
+    </Routes>
   </AuthProvider>
 );
 
