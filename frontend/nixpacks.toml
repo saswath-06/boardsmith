@@ -1,0 +1,4 @@
+# Force Node 22 — @vitejs/plugin-react@6 requires ^20.19 || >=22.12.
+# Default Nixpacks Node is 18 which fails the engine check.
+[phases.setup]
+nixPkgs = ["nodejs_22"]
