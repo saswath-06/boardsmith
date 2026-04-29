@@ -1,7 +1,8 @@
 // Boardsmith — main app shell.
-// Landing (idle) → Active dashboard with three-pane IDE layout.
+// Single persistent dashboard with a Jobs sidebar that's always visible.
+// When no project is selected, the center pane shows a welcome / new-project
+// prompt instead of switching to a separate splash screen.
 import { useEffect, useRef, useState } from "react";
-import AmbientPcb from "./components/AmbientPcb";
 import AuthGate from "./components/AuthGate";
 import LineageBreadcrumb from "./components/LineageBreadcrumb";
 import BoardsmithLogo from "./components/Logo";
@@ -9,7 +10,14 @@ import PipelineProgress from "./components/PipelineProgress";
 import PromptHistory from "./components/PromptHistory";
 import RefinePanel from "./components/RefinePanel";
 import ViewerTabs from "./components/Viewers";
-import { createJob, getJob, getLineage, refineJob, subscribeToJob } from "./api";
+import {
+  createJob,
+  getJob,
+  getLineage,
+  listJobs,
+  refineJob,
+  subscribeToJob,
+} from "./api";
 import { AuthProvider, useAuth } from "./lib/auth";
 import type {
   Board3DData,
@@ -140,25 +148,37 @@ const TopBar = ({ description, running, jobId, onSubmit, onDescriptionChange, on
   );
 };
 
-// ── Landing / idle ───────────────────────────────────────────────────────
-interface LandingProps {
+// ── Welcome pane (in-dashboard, shown when no project is selected) ───────
+interface WelcomePaneProps {
   description: string;
   running: boolean;
+  hasJobs: boolean;
   onDescriptionChange: (value: string) => void;
   onSubmit: () => void;
-  ambient?: boolean;
 }
 
-const Landing = ({ description, running, onDescriptionChange, onSubmit, ambient = true }: LandingProps) => {
-  return (
-    <section className="relative min-h-screen flex flex-col items-center justify-center px-6 py-16 overflow-hidden bs-bg-grid">
-      {ambient && <AmbientPcb />}
+const WelcomePane = ({
+  description,
+  running,
+  hasJobs,
+  onDescriptionChange,
+  onSubmit,
+}: WelcomePaneProps) => {
+  const heading = hasJobs ? "Start a new project" : "Describe your first circuit";
+  const lede = hasJobs
+    ? "Pick a project from the sidebar to review or refine, or kick off a new design below."
+    : "Boardsmith turns plain English into the full pipeline — schematic, layout, 3D render, and Gerbers — live in your browser.";
 
-      <div className="relative z-10 w-full max-w-2xl flex flex-col items-center text-center">
-        <div className="flex items-center gap-3 mb-8">
-          <BoardsmithLogo size={48} />
+  return (
+    <section
+      className="bs-panel flex h-full min-h-0 flex-col items-center overflow-y-auto bs-scroll bs-bg-grid"
+      style={{ background: "var(--bs-panel)" }}
+    >
+      <div className="w-full max-w-2xl flex flex-col items-center text-center px-6 py-12">
+        <div className="flex items-center gap-3 mb-6">
+          <BoardsmithLogo size={42} />
           <div className="flex flex-col items-start">
-            <span className="text-[26px] font-semibold tracking-tight leading-none" style={{ color: "var(--bs-fg)" }}>
+            <span className="text-[22px] font-semibold tracking-tight leading-none" style={{ color: "var(--bs-fg)" }}>
               Boardsmith
             </span>
             <span className="font-mono text-[10px] mt-1 uppercase tracking-[0.2em]" style={{ color: "var(--bs-copper)" }}>
@@ -167,28 +187,25 @@ const Landing = ({ description, running, onDescriptionChange, onSubmit, ambient 
           </div>
         </div>
 
-        <div className="mb-6 inline-flex items-center gap-2 px-3 py-1 rounded-full font-mono text-[11px]"
-          style={{ border: "1px solid var(--bs-line)", background: "var(--bs-bg-2)", color: "var(--bs-fg-mute)" }}>
-          <span className="h-1.5 w-1.5 rounded-full bs-pulse" style={{ background: "var(--bs-cyan)" }}/>
-          <span style={{ color: "var(--bs-cyan)" }}>READY</span>
-          <span style={{ color: "var(--bs-line)" }}>·</span>
-          <span>natural language → manufacturable PCB</span>
-        </div>
-
-        <h1 className="mb-4 max-w-xl text-[42px] leading-[1.05] font-semibold tracking-tight"
-          style={{ color: "var(--bs-fg)" }}>
-          Describe a circuit.<br/>
-          <span style={{ color: "var(--bs-copper)" }}>Get a board you can fab.</span>
+        <h1
+          className="mb-3 max-w-xl text-[28px] leading-[1.1] font-semibold tracking-tight"
+          style={{ color: "var(--bs-fg)" }}
+        >
+          {heading}
         </h1>
 
-        <p className="mb-10 max-w-lg text-[15px] leading-relaxed" style={{ color: "var(--bs-fg-mute)" }}>
-          Boardsmith turns plain English into the full pipeline — schematic, layout, 3D
-          render, and Gerbers — live in your browser. Refine with follow-ups, then upload to JLCPCB.
+        <p
+          className="mb-8 max-w-md text-[13.5px] leading-relaxed"
+          style={{ color: "var(--bs-fg-mute)" }}
+        >
+          {lede}
         </p>
 
-        <div className="w-full bs-brackets bs-panel p-3" style={{ background: "var(--bs-panel)" }}>
-          <div className="flex items-center gap-2 px-1 pb-2 font-mono text-[10px] uppercase tracking-widest"
-            style={{ color: "var(--bs-fg-dim)" }}>
+        <div className="w-full bs-brackets bs-panel p-3" style={{ background: "var(--bs-bg)" }}>
+          <div
+            className="flex items-center gap-2 px-1 pb-2 font-mono text-[10px] uppercase tracking-widest"
+            style={{ color: "var(--bs-fg-dim)" }}
+          >
             <span style={{ color: "var(--bs-copper)" }}>▍</span>
             <span>describe.your.circuit</span>
             <span className="ml-auto">{description.trim().length} chars</span>
@@ -197,9 +214,9 @@ const Landing = ({ description, running, onDescriptionChange, onSubmit, ambient 
             value={description}
             onChange={(e) => onDescriptionChange(e.target.value)}
             placeholder="An ESP32 connected to a DHT22 temperature sensor, USB-C power input…"
-            className="w-full min-h-[110px] resize-none p-3 outline-none rounded text-[14px] leading-[1.55] font-mono"
+            className="w-full min-h-[110px] resize-none p-3 outline-none rounded text-[13.5px] leading-[1.55] font-mono"
             style={{
-              background: "var(--bs-bg)",
+              background: "var(--bs-bg-2)",
               border: "1px solid var(--bs-line-soft)",
               color: "var(--bs-fg)",
             }}
@@ -213,45 +230,50 @@ const Landing = ({ description, running, onDescriptionChange, onSubmit, ambient 
             <button
               onClick={onSubmit}
               disabled={running || description.trim().length < 3}
-              className="bs-btn-primary ml-auto px-5 py-2.5 rounded flex items-center gap-2 text-[13px]">
+              className="bs-btn-primary ml-auto px-5 py-2.5 rounded flex items-center gap-2 text-[13px]"
+            >
               {running ? <><span className="bs-spin"/>Building PCB…</> : <>Generate PCB →</>}
             </button>
           </div>
         </div>
 
-        <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
-          <span className="font-mono text-[10px] uppercase tracking-widest" style={{ color: "var(--bs-fg-dim)" }}>Try:</span>
+        <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
+          <span className="font-mono text-[10px] uppercase tracking-widest" style={{ color: "var(--bs-fg-dim)" }}>
+            Try:
+          </span>
           {SAMPLE_PROMPTS.map((p) => (
-            <button key={p}
+            <button
+              key={p}
               onClick={() => onDescriptionChange(p)}
-              className="px-3 py-1 rounded-full text-[12px] transition-colors"
+              className="px-3 py-1 rounded-full text-[11.5px] transition-colors"
               style={{ border: "1px solid var(--bs-line)", color: "var(--bs-fg-mute)", background: "var(--bs-bg-2)" }}
-              onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--bs-copper)"; e.currentTarget.style.color = "var(--bs-copper-2)"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--bs-line)"; e.currentTarget.style.color = "var(--bs-fg-mute)"; }}>
+              onMouseEnter={(e) => {
+                e.currentTarget.style.borderColor = "var(--bs-copper)";
+                e.currentTarget.style.color = "var(--bs-copper-2)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.borderColor = "var(--bs-line)";
+                e.currentTarget.style.color = "var(--bs-fg-mute)";
+              }}
+            >
               {p}
             </button>
           ))}
         </div>
 
-        <div className="mt-12 grid grid-cols-3 gap-6 max-w-xl">
+        <div className="mt-10 grid grid-cols-3 gap-6 max-w-xl text-left">
           {[
-            ["01", "Schematic", "schemdraw + skidl"],
-            ["02", "PCB layout", "force-directed + lee"],
+            ["01", "Schematic", "custom SVG · KiCad sch"],
+            ["02", "PCB layout", "force-directed + Lee router"],
             ["03", "Gerber",    "RS-274X · JLCPCB-ready"],
           ].map(([n, t, s]) => (
-            <div key={n} className="text-left">
+            <div key={n}>
               <div className="font-mono text-[10px] mb-1" style={{ color: "var(--bs-copper)" }}>STAGE {n}</div>
-              <div className="text-[13px] font-medium" style={{ color: "var(--bs-fg)" }}>{t}</div>
+              <div className="text-[12.5px] font-medium" style={{ color: "var(--bs-fg)" }}>{t}</div>
               <div className="font-mono text-[10px] mt-0.5" style={{ color: "var(--bs-fg-dim)" }}>{s}</div>
             </div>
           ))}
         </div>
-      </div>
-
-      <div className="absolute bottom-4 left-0 right-0 flex justify-between px-6 font-mono text-[10px] uppercase tracking-widest z-10"
-        style={{ color: "var(--bs-fg-dim)" }}>
-        <span>boardsmith · 2026</span>
-        <span>natural language → fr4 · in seconds</span>
       </div>
     </section>
   );
@@ -530,22 +552,25 @@ function useRealPipeline(): PipelineState {
   };
 }
 
-// ── Active dashboard: three-pane IDE layout ──────────────────────────────
-interface ActiveDashboardProps {
+// ── Dashboard: persistent layout with always-visible Jobs sidebar ────────
+interface DashboardProps {
   description: string;
+  hasJobs: boolean;
   pipeline: PipelineState;
   onSubmit: () => void;
   onDescriptionChange: (value: string) => void;
-  onReset: () => void;
+  onNew: () => void;
 }
 
-const ActiveDashboard = ({
+const Dashboard = ({
   description,
+  hasJobs,
   pipeline,
   onSubmit,
   onDescriptionChange,
-  onReset,
-}: ActiveDashboardProps) => {
+  onNew,
+}: DashboardProps) => {
+  const hasProject = pipeline.activeJobId !== null;
   const recentInstructions = pipeline.lineage
     .filter((entry) => entry.revision > 0)
     .map((entry) => entry.title);
@@ -558,43 +583,59 @@ const ActiveDashboard = ({
         jobId={pipeline.jobId}
         onSubmit={onSubmit}
         onDescriptionChange={onDescriptionChange}
-        onReset={onReset}
+        onReset={onNew}
       />
-      <main className="flex-1 grid gap-2 p-2 min-h-0"
-        style={{ gridTemplateColumns: "240px 320px 1fr" }}>
+      <main
+        className="flex-1 grid gap-2 p-2 min-h-0"
+        style={{
+          gridTemplateColumns: hasProject ? "240px 320px 1fr" : "240px 1fr",
+        }}
+      >
         <PromptHistory
           activeId={pipeline.activeJobId}
           bump={pipeline.jobsBump}
           onSelect={(id) => void pipeline.loadJob(id)}
-          onNew={onReset}
+          onNew={onNew}
         />
-        <PipelineProgress
-          stageStatus={pipeline.stageStatus}
-          stageLogs={pipeline.stageLogs}
-          activeStage={pipeline.activeStage}
-        />
-        <div className="min-h-0 flex flex-col">
-          <LineageBreadcrumb
-            entries={pipeline.lineage}
-            activeJobId={pipeline.activeJobId}
-            onSelect={(id) => void pipeline.loadJob(id)}
-          />
-          <div className="flex-1 min-h-0">
-            <ViewerTabs
-              data={pipeline.data}
-              schematic={pipeline.schematic}
-              gerber={pipeline.gerber}
-              bom={pipeline.bom}
-              jobId={pipeline.jobId}
+        {hasProject ? (
+          <>
+            <PipelineProgress
+              stageStatus={pipeline.stageStatus}
+              stageLogs={pipeline.stageLogs}
+              activeStage={pipeline.activeStage}
             />
-          </div>
-          <RefinePanel
-            parentJobId={pipeline.activeJobId}
+            <div className="min-h-0 flex flex-col">
+              <LineageBreadcrumb
+                entries={pipeline.lineage}
+                activeJobId={pipeline.activeJobId}
+                onSelect={(id) => void pipeline.loadJob(id)}
+              />
+              <div className="flex-1 min-h-0">
+                <ViewerTabs
+                  data={pipeline.data}
+                  schematic={pipeline.schematic}
+                  gerber={pipeline.gerber}
+                  bom={pipeline.bom}
+                  jobId={pipeline.jobId}
+                />
+              </div>
+              <RefinePanel
+                parentJobId={pipeline.activeJobId}
+                running={pipeline.running}
+                recentInstructions={recentInstructions}
+                onRefine={(inst) => void pipeline.refine(inst)}
+              />
+            </div>
+          </>
+        ) : (
+          <WelcomePane
+            description={description}
             running={pipeline.running}
-            recentInstructions={recentInstructions}
-            onRefine={(inst) => void pipeline.refine(inst)}
+            hasJobs={hasJobs}
+            onDescriptionChange={onDescriptionChange}
+            onSubmit={onSubmit}
           />
-        </div>
+        )}
       </main>
     </div>
   );
@@ -604,18 +645,49 @@ const ActiveDashboard = ({
 const AppInner = () => {
   const { session, loading } = useAuth();
   const [description, setDescription] = useState(DEMO_PROMPT);
-  const [mode, setMode] = useState<"idle" | "active">("idle");
+  const [hasJobs, setHasJobs] = useState(false);
+  const [autoOpened, setAutoOpened] = useState(false);
   const pipeline = useRealPipeline();
 
   const submit = async () => {
-    setMode("active");
     await pipeline.start(description);
   };
 
-  const reset = () => {
-    setMode("idle");
+  const newProject = () => {
     pipeline.reset();
+    setDescription(DEMO_PROMPT);
   };
+
+  // Auto-open the most recent project on first sign-in so returning users
+  // land where they left off. Subsequent jobs/refinements update via the
+  // jobsBump signal but don't trigger another auto-open.
+  useEffect(() => {
+    if (!session || autoOpened) return;
+    let cancelled = false;
+    listJobs()
+      .then((jobs) => {
+        if (cancelled) return;
+        setHasJobs(jobs.length > 0);
+        if (jobs.length > 0 && !pipeline.activeJobId) {
+          void pipeline.loadJob(jobs[0].job_id);
+        }
+        setAutoOpened(true);
+      })
+      .catch(() => {
+        if (!cancelled) setAutoOpened(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [session, autoOpened, pipeline]);
+
+  // Keep the empty-state copy fresh when jobs are added/removed.
+  useEffect(() => {
+    if (!session) return;
+    listJobs()
+      .then((jobs) => setHasJobs(jobs.length > 0))
+      .catch(() => {});
+  }, [session, pipeline.jobsBump]);
 
   if (loading) {
     return (
@@ -633,25 +705,14 @@ const AppInner = () => {
   }
 
   return (
-    <div className="min-h-screen" data-screen-label={mode === "idle" ? "Landing" : "Active dashboard"}>
-      {mode === "idle" ? (
-        <Landing
-          description={description}
-          running={pipeline.running}
-          onDescriptionChange={setDescription}
-          onSubmit={submit}
-          ambient
-        />
-      ) : (
-        <ActiveDashboard
-          description={description}
-          pipeline={pipeline}
-          onSubmit={submit}
-          onDescriptionChange={setDescription}
-          onReset={reset}
-        />
-      )}
-    </div>
+    <Dashboard
+      description={description}
+      hasJobs={hasJobs}
+      pipeline={pipeline}
+      onSubmit={submit}
+      onDescriptionChange={setDescription}
+      onNew={newProject}
+    />
   );
 };
 
