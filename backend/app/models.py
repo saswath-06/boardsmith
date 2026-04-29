@@ -37,6 +37,38 @@ class JobSnapshot(BaseModel):
     complete: bool
     events: list[PipelineEvent]
     artifacts: list[ArtifactInfo]
+    parent_job_id: str | None = None
+    instruction: str | None = None
+    revision: int = 0
+    description: str = ""
+    created_at: float = 0.0
+
+
+class JobSummary(BaseModel):
+    """Lightweight row for the sidebar list (`GET /api/jobs`)."""
+
+    job_id: str
+    description: str
+    instruction: str | None = None
+    parent_job_id: str | None = None
+    revision: int = 0
+    complete: bool = False
+    components: int = 0
+    nets: int = 0
+    created_at: float = 0.0
+
+
+class LineageEntry(BaseModel):
+    """One node in a refinement chain (root → leaf)."""
+
+    job_id: str
+    revision: int
+    title: str
+    complete: bool
+
+
+class RefineRequest(BaseModel):
+    instruction: str = Field(..., min_length=3)
 
 
 class PinDefinition(BaseModel):

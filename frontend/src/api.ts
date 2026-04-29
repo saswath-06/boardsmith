@@ -1,4 +1,9 @@
-import type { PipelineEvent } from "./types";
+import type {
+  JobSnapshot,
+  JobSummary,
+  LineageEntry,
+  PipelineEvent,
+} from "./types";
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
@@ -17,6 +22,40 @@ export async function createJob(description: string): Promise<CreateJobResponse>
     throw new Error(`Failed to create job: ${res.status} ${text}`);
   }
   return (await res.json()) as CreateJobResponse;
+}
+
+export async function refineJob(
+  parentId: string,
+  instruction: string
+): Promise<CreateJobResponse> {
+  const res = await fetch(`${API_URL}/api/jobs/${parentId}/refine`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ instruction }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Failed to refine job: ${res.status} ${text}`);
+  }
+  return (await res.json()) as CreateJobResponse;
+}
+
+export async function listJobs(): Promise<JobSummary[]> {
+  const res = await fetch(`${API_URL}/api/jobs`);
+  if (!res.ok) throw new Error(`Failed to list jobs: ${res.status}`);
+  return (await res.json()) as JobSummary[];
+}
+
+export async function getJob(jobId: string): Promise<JobSnapshot> {
+  const res = await fetch(`${API_URL}/api/jobs/${jobId}`);
+  if (!res.ok) throw new Error(`Failed to fetch job: ${res.status}`);
+  return (await res.json()) as JobSnapshot;
+}
+
+export async function getLineage(jobId: string): Promise<LineageEntry[]> {
+  const res = await fetch(`${API_URL}/api/jobs/${jobId}/lineage`);
+  if (!res.ok) throw new Error(`Failed to fetch lineage: ${res.status}`);
+  return (await res.json()) as LineageEntry[];
 }
 
 export function subscribeToJob(

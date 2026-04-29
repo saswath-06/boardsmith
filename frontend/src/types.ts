@@ -74,3 +74,39 @@ export interface LogEntry {
   level: "info" | "ok" | "warn" | "err";
   msg: string;
 }
+
+export interface ArtifactInfo {
+  name: string;
+  url: string;
+}
+
+export interface JobSnapshot {
+  job_id: string;
+  complete: boolean;
+  events: PipelineEvent[];
+  artifacts: ArtifactInfo[];
+  parent_job_id?: string | null;
+  instruction?: string | null;
+  revision: number;
+  description: string;
+  created_at: number;
+}
+
+export interface JobSummary {
+  job_id: string;
+  description: string;
+  instruction?: string | null;
+  parent_job_id?: string | null;
+  revision: number;
+  complete: boolean;
+  components: number;
+  nets: number;
+  created_at: number;
+}
+
+export interface LineageEntry {
+  job_id: string;
+  revision: number;
+  title: string;
+  complete: boolean;
+}

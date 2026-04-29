@@ -10,8 +10,16 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 
-from app.models import JobCreateResponse, JobRequest, JobSnapshot
-from app.pipeline import run_pipeline
+from app.models import (
+    CircuitDesign,
+    JobCreateResponse,
+    JobRequest,
+    JobSnapshot,
+    JobSummary,
+    LineageEntry,
+    RefineRequest,
+)
+from app.pipeline import run_pipeline, run_refinement_pipeline
 from app.storage import STORE
 
 load_dotenv()
@@ -58,12 +66,53 @@ async def create_job(request: JobRequest) -> JobCreateResponse:
     return JobCreateResponse(job_id=job.job_id)
 
 
+@app.get("/api/jobs", response_model=list[JobSummary])
+async def list_jobs() -> list[JobSummary]:
+    """All jobs in this process, newest first. Used by the sidebar."""
+    return STORE.summaries()
+
+
 @app.get("/api/jobs/{job_id}", response_model=JobSnapshot)
 async def get_job(job_id: str) -> JobSnapshot:
     snapshot = STORE.snapshot(job_id)
     if not snapshot:
         raise HTTPException(status_code=404, detail="job not found")
     return snapshot
+
+
+@app.get("/api/jobs/{job_id}/lineage", response_model=list[LineageEntry])
+async def get_lineage(job_id: str) -> list[LineageEntry]:
+    chain = STORE.lineage(job_id)
+    if chain is None:
+        raise HTTPException(status_code=404, detail="job not found")
+    return chain
+
+
+@app.post("/api/jobs/{parent_id}/refine", response_model=JobCreateResponse)
+async def refine_job(parent_id: str, request: RefineRequest) -> JobCreateResponse:
+    parent = STORE.get(parent_id)
+    if parent is None:
+        raise HTTPException(status_code=404, detail="parent job not found")
+    if not parent.complete:
+        raise HTTPException(status_code=409, detail="parent job is not complete yet")
+    design_path = parent.output_dir / "circuit.json"
+    if not design_path.exists():
+        raise HTTPException(status_code=410, detail="parent design no longer available")
+
+    try:
+        parent_design = CircuitDesign.model_validate(
+            json.loads(design_path.read_text(encoding="utf-8"))
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"failed to load parent design: {exc}")
+
+    try:
+        child = STORE.create_revision(parent_id, request.instruction)
+    except (KeyError, ValueError, FileNotFoundError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    asyncio.create_task(run_refinement_pipeline(child, parent_design))
+    return JobCreateResponse(job_id=child.job_id)
 
 
 async def _event_stream(job_id: str) -> AsyncIterator[str]:

@@ -69,6 +69,127 @@ Rules:
 """
 
 
+def _refine_system_prompt() -> str:
+    """System prompt for iterative edits — emphasizes preservation."""
+    allowed = ", ".join(supported_component_names())
+    return f"""You are Boardsmith, a PCB design refiner.
+You are MODIFYING an existing circuit. Return STRICT JSON only — the FULL
+updated design (not a diff, not a patch). No markdown.
+
+Allowed component types only:
+{allowed}
+
+Schema (same as the original parser):
+{{
+  "project_name": "Short_Project_Name",
+  "description": "one sentence",
+  "components": [
+    {{"ref": "U1", "type": "ESP32", "label": "ESP32", "value": "optional value", "notes": "optional"}}
+  ],
+  "nets": [
+    {{
+      "name": "3V3",
+      "kind": "power",
+      "connections": [
+        {{"ref": "U1", "pin": "3V3"}}
+      ]
+    }}
+  ],
+  "warnings": ["unsupported request or assumption"]
+}}
+
+Rules:
+- Preserve EVERY component from the previous design unless the user instruction
+  explicitly removes or replaces it. Do not delete components for brevity.
+- Keep reference designators STABLE. R1 stays R1. Only assign new refs
+  (continuing the existing sequence: R5, R6, R7…) for newly added parts.
+- Preserve EVERY net connection unless the instruction explicitly changes it.
+- If the instruction only adds parts, the output must contain every original
+  component plus the new ones.
+- If the instruction is ambiguous, pick the most conservative interpretation
+  and add a string to "warnings" describing the assumption.
+- Use only allowed component types. Substitute the nearest allowed part if the
+  user requests an unsupported one and add a warning.
+- PRESERVE EVERY QUANTITY — same rules as initial parsing. "add eight LEDs"
+  means eight separate LED components with eight resistors and eight nets.
+- There is no length limit on the output.
+"""
+
+
+def refine_with_gemini(prev: CircuitDesign, instruction: str) -> CircuitDesign:
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise RuntimeError("GEMINI_API_KEY is not set")
+    try:
+        from google import genai
+        from google.genai import types
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError(f"google-genai is unavailable: {exc}") from exc
+
+    user_message = (
+        "PREVIOUS DESIGN (JSON):\n"
+        f"{prev.model_dump_json(indent=2)}\n\n"
+        "USER INSTRUCTION:\n"
+        f"{instruction}"
+    )
+
+    client = genai.Client(api_key=api_key)
+    response = client.models.generate_content(
+        model=MODEL,
+        contents=user_message,
+        config=types.GenerateContentConfig(
+            system_instruction=_refine_system_prompt(),
+            response_mime_type="application/json",
+            max_output_tokens=32768,
+        ),
+    )
+    raw = response.text or ""
+    print(f"[boardsmith.llm.refine] raw response: {len(raw)} chars", flush=True)
+
+    try:
+        _DEBUG_DIR.mkdir(parents=True, exist_ok=True)
+        idx = len(list(_DEBUG_DIR.glob("refine_*.json")))
+        (_DEBUG_DIR / f"refine_{idx:03d}.json").write_text(raw, encoding="utf-8")
+    except Exception:  # noqa: BLE001
+        pass
+
+    data = _extract_json(raw)
+    print(
+        f"[boardsmith.llm.refine] extracted JSON: "
+        f"{len(data.get('components', []))} components, "
+        f"{len(data.get('nets', []))} nets",
+        flush=True,
+    )
+    design = CircuitDesign.model_validate(data)
+    print(
+        f"[boardsmith.llm.refine] parsed: {len(design.components)} components, "
+        f"{len(design.nets)} nets, {len(design.warnings)} warnings",
+        flush=True,
+    )
+    return design
+
+
+def refine_circuit_design(prev: CircuitDesign, instruction: str) -> CircuitDesign:
+    """Apply ``instruction`` to ``prev``. On any failure return ``prev`` plus a warning."""
+    try:
+        design = refine_with_gemini(prev, instruction)
+    except Exception as exc:  # noqa: BLE001
+        print(
+            f"[boardsmith.llm.refine] refine FAILED — keeping previous design. Reason: {exc}",
+            flush=True,
+        )
+        warnings = [*prev.warnings, f"refinement failed — kept previous design ({exc})"]
+        return prev.model_copy(update={"warnings": warnings})
+    if not design.components or not design.nets:
+        print(
+            "[boardsmith.llm.refine] empty refinement — keeping previous design",
+            flush=True,
+        )
+        warnings = [*prev.warnings, "refinement returned empty design — kept previous"]
+        return prev.model_copy(update={"warnings": warnings})
+    return design
+
+
 def _followup_if_needed(client: Any, design: CircuitDesign, description: str) -> CircuitDesign:
     """Deliberately disabled.
 
