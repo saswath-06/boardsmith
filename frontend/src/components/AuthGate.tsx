@@ -72,7 +72,7 @@ const AuthGate = () => {
         <button
           onClick={() => void signInWithGoogle()}
           disabled={loading}
-          className="bs-btn-primary px-5 py-3 rounded flex items-center gap-3 text-[14px] font-medium disabled:opacity-50"
+          className="bs-btn-primary px-5 py-3 rounded flex items-center justify-center gap-3 text-[14px] font-medium disabled:opacity-50"
           style={{ minWidth: 260 }}
         >
           <GoogleGlyph />

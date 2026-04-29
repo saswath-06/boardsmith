@@ -67,10 +67,6 @@ const TopBar = ({ description, running, jobId, onSubmit, onDescriptionChange, on
         <span className="text-[15px] font-semibold tracking-tight" style={{ color: "var(--bs-fg)" }}>
           Boardsmith
         </span>
-        <span className="font-mono text-[10px] px-1.5 py-0.5 rounded uppercase tracking-wider"
-          style={{ color: "var(--bs-copper)", border: "1px solid var(--bs-copper)" }}>
-          v0.2
-        </span>
       </button>
 
       <div className="hidden md:flex items-center gap-2 font-mono text-[11px]" style={{ color: "var(--bs-fg-dim)" }}>
