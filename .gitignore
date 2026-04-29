@@ -56,3 +56,9 @@ htmlcov/
 
 # ── TypeScript build info ───────────────────────────────────────────────
 *.tsbuildinfo
+
+# ── Reference / experiment folders (not part of the project) ────────────
+SchematIQ-main/
+boardsmith_ui/
+frontend-old/
+frontend_false/

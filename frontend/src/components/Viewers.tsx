@@ -2,6 +2,7 @@
 import { Fragment, useState } from "react";
 import type { BomData, Board3DData, GerberData, SchematicData } from "../types";
 import { artifactUrl } from "../api";
+import { useAuth } from "../lib/auth";
 import Board3DViewer from "./Board3DViewer";
 
 // ── PCB layout viewer — top-down board render with traces, pads, components.
@@ -402,14 +403,16 @@ interface ViewerTabsProps {
 
 const ViewerTabs = ({ data, schematic, gerber, bom, jobId }: ViewerTabsProps) => {
   const [active, setActive] = useState<TabId>("3d");
+  const { session } = useAuth();
+  const token = session?.access_token ?? null;
   const kicadArtifact = schematic?.artifacts?.kicad_schematic;
-  const kicadHref = kicadArtifact ? artifactUrl(kicadArtifact) : "";
+  const kicadHref = kicadArtifact ? artifactUrl(kicadArtifact, token) : "";
   const kicadFilename = schematic?.kicad_filename ?? "boardsmith.kicad_sch";
-  const downloadHref = gerber?.download_url ? artifactUrl(gerber.download_url) : "";
+  const downloadHref = gerber?.download_url ? artifactUrl(gerber.download_url, token) : "";
   const filename = gerber?.filename ?? "boardsmith.zip";
-  const bomCsvHref = bom?.artifacts?.bom_csv ? artifactUrl(bom.artifacts.bom_csv) : "";
+  const bomCsvHref = bom?.artifacts?.bom_csv ? artifactUrl(bom.artifacts.bom_csv, token) : "";
   const bomCsvName = bom?.filenames?.bom_csv ?? "boardsmith_BOM.csv";
-  const bomJlcpcbHref = bom?.artifacts?.bom_jlcpcb_csv ? artifactUrl(bom.artifacts.bom_jlcpcb_csv) : "";
+  const bomJlcpcbHref = bom?.artifacts?.bom_jlcpcb_csv ? artifactUrl(bom.artifacts.bom_jlcpcb_csv, token) : "";
   const bomJlcpcbName = bom?.filenames?.bom_jlcpcb_csv ?? "boardsmith_BOM_JLCPCB.csv";
   return (
     <section className="bs-panel flex flex-col h-full overflow-hidden">

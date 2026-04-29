@@ -51,12 +51,15 @@ async def _safe_stage(
         return result
 
 
-def _persist_design(job: JobRecord, design: CircuitDesign) -> CircuitDesign:
-    """Normalize pin aliases, write circuit.json, register the artifact."""
+async def _persist_design(job: JobRecord, design: CircuitDesign) -> CircuitDesign:
+    """Normalize pin aliases, write circuit.json (disk + Postgres)."""
     design = normalize_design(design)
+    design_dict = design.model_dump(mode="json")
     path = job.output_dir / "circuit.json"
-    path.write_text(json.dumps(design.model_dump(mode="json"), indent=2), encoding="utf-8")
+    path.write_text(json.dumps(design_dict, indent=2), encoding="utf-8")
     STORE.add_artifact(job.job_id, "circuit_json", path)
+    # Persist into Postgres so refinement survives Railway redeploys.
+    await STORE.persist_design(job.job_id, design_dict)
     return design
 
 
@@ -71,7 +74,7 @@ async def run_pipeline(job: JobRecord) -> None:
             lambda: _async_value(parse_circuit_description(job.description)),
             lambda exc: fallback_design(job.description, str(exc)),
         )
-        design = _persist_design(job, design)
+        design = await _persist_design(job, design)
         if design.warnings:
             await _emit(job.job_id, "parse", StageStatus.error, "Warning: parser used assumptions.", {"warnings": design.warnings})
         await _run_downstream(job, design)
@@ -95,7 +98,7 @@ async def run_refinement_pipeline(job: JobRecord, parent_design: CircuitDesign) 
                 "warnings": [*parent_design.warnings, f"refinement failed — kept previous ({exc})"],
             }),
         )
-        design = _persist_design(job, design)
+        design = await _persist_design(job, design)
         if design.warnings:
             await _emit(job.job_id, "parse", StageStatus.error, "Warning: refinement used assumptions.", {"warnings": design.warnings})
         await _run_downstream(job, design)
@@ -232,12 +235,13 @@ async def _run_downstream(job: JobRecord, design: CircuitDesign) -> None:
         lambda exc: {"error": str(exc), "download_url": None},
     )
 
+    snapshot = await STORE.snapshot_for_user(job.user_id, job.job_id)
     await _emit(
         job.job_id,
         "done",
         StageStatus.complete,
         "Boardsmith pipeline complete.",
-        STORE.snapshot(job.job_id),
+        snapshot,
     )
 
 

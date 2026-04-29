@@ -2,6 +2,7 @@
 // Landing (idle) → Active dashboard with three-pane IDE layout.
 import { useEffect, useRef, useState } from "react";
 import AmbientPcb from "./components/AmbientPcb";
+import AuthGate from "./components/AuthGate";
 import LineageBreadcrumb from "./components/LineageBreadcrumb";
 import BoardsmithLogo from "./components/Logo";
 import PipelineProgress from "./components/PipelineProgress";
@@ -9,6 +10,7 @@ import PromptHistory from "./components/PromptHistory";
 import RefinePanel from "./components/RefinePanel";
 import ViewerTabs from "./components/Viewers";
 import { createJob, getJob, getLineage, refineJob, subscribeToJob } from "./api";
+import { AuthProvider, useAuth } from "./lib/auth";
 import type {
   Board3DData,
   BomData,
@@ -44,7 +46,11 @@ interface TopBarProps {
 }
 
 const TopBar = ({ description, running, jobId, onSubmit, onDescriptionChange, onReset }: TopBarProps) => {
+  const { user, signOut } = useAuth();
   const breadcrumb = jobId ? jobId.slice(0, 8) : "—";
+  const initials = (user?.email ?? "?").slice(0, 2).toUpperCase();
+  const avatarUrl = (user?.user_metadata?.avatar_url as string | undefined) ?? null;
+
   return (
     <header className="flex items-center gap-4 px-4 h-12 border-b shrink-0"
       style={{ borderColor: "var(--bs-line-soft)", background: "var(--bs-bg-2)" }}>
@@ -55,7 +61,7 @@ const TopBar = ({ description, running, jobId, onSubmit, onDescriptionChange, on
         </span>
         <span className="font-mono text-[10px] px-1.5 py-0.5 rounded uppercase tracking-wider"
           style={{ color: "var(--bs-copper)", border: "1px solid var(--bs-copper)" }}>
-          v0.1
+          v0.2
         </span>
       </button>
 
@@ -97,7 +103,38 @@ const TopBar = ({ description, running, jobId, onSubmit, onDescriptionChange, on
           {running ? "Running" : "Ready"}
         </span>
         <span style={{ color: "var(--bs-line)" }}>·</span>
-        <span>backend · 127.0.0.1:8000</span>
+        <div className="flex items-center gap-2">
+          {avatarUrl ? (
+            <img
+              src={avatarUrl}
+              alt=""
+              className="h-5 w-5 rounded-full"
+              style={{ border: "1px solid var(--bs-line)" }}
+            />
+          ) : (
+            <span
+              className="h-5 w-5 rounded-full flex items-center justify-center text-[9px] font-semibold"
+              style={{
+                background: "var(--bs-panel-2)",
+                border: "1px solid var(--bs-line)",
+                color: "var(--bs-fg)",
+              }}
+            >
+              {initials}
+            </span>
+          )}
+          <span className="hidden lg:inline normal-case tracking-normal" style={{ color: "var(--bs-fg-mute)" }}>
+            {user?.email}
+          </span>
+          <button
+            onClick={() => void signOut()}
+            className="font-mono text-[10px] uppercase tracking-widest hover:text-[color:var(--bs-copper)]"
+            style={{ color: "var(--bs-fg-dim)" }}
+            title="Sign out"
+          >
+            Sign out
+          </button>
+        </div>
       </div>
     </header>
   );
@@ -396,7 +433,7 @@ function useRealPipeline(): PipelineState {
     }
   };
 
-  const stream = (newJobId: string) => {
+  const stream = async (newJobId: string) => {
     closeSource();
     streamingJobRef.current = newJobId;
     setJobId(newJobId);
@@ -405,7 +442,7 @@ function useRealPipeline(): PipelineState {
     setRunning(true);
     setJobsBump((n) => n + 1);
     void refreshLineage(newJobId);
-    const source = subscribeToJob(newJobId, handleEvent, () => {
+    const source = await subscribeToJob(newJobId, handleEvent, () => {
       closeSource();
       setRunning(false);
     });
@@ -415,7 +452,7 @@ function useRealPipeline(): PipelineState {
   const start = async (description: string) => {
     try {
       const { job_id } = await createJob(description);
-      stream(job_id);
+      await stream(job_id);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       appendLog("parse", { level: "err", msg: `Failed to start job: ${msg}` });
@@ -427,7 +464,7 @@ function useRealPipeline(): PipelineState {
     if (!activeJobId) return;
     try {
       const { job_id } = await refineJob(activeJobId, instruction);
-      stream(job_id);
+      await stream(job_id);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       appendLog("parse", { level: "err", msg: `Failed to refine job: ${msg}` });
@@ -455,7 +492,7 @@ function useRealPipeline(): PipelineState {
       if (!snapshot.complete) {
         streamingJobRef.current = id;
         setRunning(true);
-        const source = subscribeToJob(id, handleEvent, () => {
+        const source = await subscribeToJob(id, handleEvent, () => {
           closeSource();
           setRunning(false);
         });
@@ -564,7 +601,8 @@ const ActiveDashboard = ({
 };
 
 // ── Root ────────────────────────────────────────────────────────────────
-const App = () => {
+const AppInner = () => {
+  const { session, loading } = useAuth();
   const [description, setDescription] = useState(DEMO_PROMPT);
   const [mode, setMode] = useState<"idle" | "active">("idle");
   const pipeline = useRealPipeline();
@@ -578,6 +616,21 @@ const App = () => {
     setMode("idle");
     pipeline.reset();
   };
+
+  if (loading) {
+    return (
+      <div
+        className="min-h-screen flex items-center justify-center font-mono text-[11px]"
+        style={{ color: "var(--bs-fg-dim)" }}
+      >
+        Loading session…
+      </div>
+    );
+  }
+
+  if (!session) {
+    return <AuthGate />;
+  }
 
   return (
     <div className="min-h-screen" data-screen-label={mode === "idle" ? "Landing" : "Active dashboard"}>
@@ -601,5 +654,11 @@ const App = () => {
     </div>
   );
 };
+
+const App = () => (
+  <AuthProvider>
+    <AppInner />
+  </AuthProvider>
+);
 
 export default App;

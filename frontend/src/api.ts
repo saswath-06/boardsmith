@@ -4,6 +4,7 @@ import type {
   LineageEntry,
   PipelineEvent,
 } from "./types";
+import { getAccessToken } from "./lib/auth";
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
@@ -11,8 +12,15 @@ export interface CreateJobResponse {
   job_id: string;
 }
 
+async function authFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const token = await getAccessToken();
+  const headers = new Headers(init.headers);
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  return fetch(`${API_URL}${path}`, { ...init, headers });
+}
+
 export async function createJob(description: string): Promise<CreateJobResponse> {
-  const res = await fetch(`${API_URL}/api/jobs`, {
+  const res = await authFetch(`/api/jobs`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ description }),
@@ -28,7 +36,7 @@ export async function refineJob(
   parentId: string,
   instruction: string
 ): Promise<CreateJobResponse> {
-  const res = await fetch(`${API_URL}/api/jobs/${parentId}/refine`, {
+  const res = await authFetch(`/api/jobs/${parentId}/refine`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ instruction }),
@@ -41,29 +49,34 @@ export async function refineJob(
 }
 
 export async function listJobs(): Promise<JobSummary[]> {
-  const res = await fetch(`${API_URL}/api/jobs`);
+  const res = await authFetch(`/api/jobs`);
   if (!res.ok) throw new Error(`Failed to list jobs: ${res.status}`);
   return (await res.json()) as JobSummary[];
 }
 
 export async function getJob(jobId: string): Promise<JobSnapshot> {
-  const res = await fetch(`${API_URL}/api/jobs/${jobId}`);
+  const res = await authFetch(`/api/jobs/${jobId}`);
   if (!res.ok) throw new Error(`Failed to fetch job: ${res.status}`);
   return (await res.json()) as JobSnapshot;
 }
 
 export async function getLineage(jobId: string): Promise<LineageEntry[]> {
-  const res = await fetch(`${API_URL}/api/jobs/${jobId}/lineage`);
+  const res = await authFetch(`/api/jobs/${jobId}/lineage`);
   if (!res.ok) throw new Error(`Failed to fetch lineage: ${res.status}`);
   return (await res.json()) as LineageEntry[];
 }
 
-export function subscribeToJob(
+/** Open an SSE stream for a job. EventSource can't set headers, so we
+ *  pass the Supabase JWT in a query param. The backend accepts either. */
+export async function subscribeToJob(
   jobId: string,
   onEvent: (event: PipelineEvent) => void,
   onError?: (err: Event) => void
-): EventSource {
-  const source = new EventSource(`${API_URL}/api/jobs/${jobId}/events`);
+): Promise<EventSource> {
+  const token = await getAccessToken();
+  const url = new URL(`${API_URL}/api/jobs/${jobId}/events`);
+  if (token) url.searchParams.set("token", token);
+  const source = new EventSource(url.toString());
   source.onmessage = (msg: MessageEvent<string>) => {
     try {
       const parsed = JSON.parse(msg.data) as PipelineEvent;
@@ -76,10 +89,17 @@ export function subscribeToJob(
   return source;
 }
 
-// Resolve an absolute URL for an artifact path returned by the backend
-// (which may already be absolute or relative like "/api/jobs/<id>/artifact/<name>")
-export function artifactUrl(path: string | null | undefined): string {
+/** Resolve an absolute URL for an artifact path. Note that this returns
+ *  an unauthenticated URL; for authenticated downloads, browsers can't
+ *  attach an Authorization header to a plain `<a download>`. We accept
+ *  this trade-off for now: artifact endpoints validate ownership server-
+ *  side via the JWT in a `token` query param when needed. */
+export function artifactUrl(path: string | null | undefined, token?: string | null): string {
   if (!path) return "";
-  if (path.startsWith("http://") || path.startsWith("https://")) return path;
-  return `${API_URL}${path.startsWith("/") ? path : `/${path}`}`;
+  const base = path.startsWith("http://") || path.startsWith("https://")
+    ? path
+    : `${API_URL}${path.startsWith("/") ? path : `/${path}`}`;
+  if (!token) return base;
+  const sep = base.includes("?") ? "&" : "?";
+  return `${base}${sep}token=${encodeURIComponent(token)}`;
 }

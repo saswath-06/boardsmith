@@ -13,16 +13,17 @@
     "start": "vite preview --host 0.0.0.0 --port ${PORT:-4173} --strictPort"
   },
   "dependencies": {
-    "@vitejs/plugin-react": "latest",
+    "@supabase/supabase-js": "^2.105.1",
     "@tailwindcss/postcss": "latest",
+    "@vitejs/plugin-react": "latest",
     "autoprefixer": "latest",
     "postcss": "latest",
+    "react": "latest",
+    "react-dom": "latest",
     "tailwindcss": "latest",
     "three": "latest",
     "typescript": "latest",
-    "vite": "latest",
-    "react": "latest",
-    "react-dom": "latest"
+    "vite": "latest"
   },
   "devDependencies": {
     "@types/react": "latest",
