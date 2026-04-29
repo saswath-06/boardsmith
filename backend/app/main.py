@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from collections.abc import AsyncIterator
 
 from dotenv import load_dotenv
@@ -15,10 +16,30 @@ from app.storage import STORE
 
 load_dotenv()
 
+
+def _cors_origins() -> list[str]:
+    """CORS origins from env, comma-separated. Defaults to localhost dev hosts.
+
+    Use ``FRONTEND_URL`` in production (e.g. ``https://boardsmith.up.railway.app``).
+    Set ``CORS_ALLOW_ALL=1`` for the wide-open dev fallback.
+    """
+    if os.getenv("CORS_ALLOW_ALL") == "1":
+        return ["*"]
+    raw = os.getenv("FRONTEND_URL") or os.getenv("CORS_ORIGINS") or ""
+    explicit = [o.strip() for o in raw.split(",") if o.strip()]
+    defaults = [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:4173",
+        "http://127.0.0.1:4173",
+    ]
+    return explicit + defaults if explicit else defaults
+
+
 app = FastAPI(title="Boardsmith API", version="0.1.0")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -70,7 +91,17 @@ async def _event_stream(job_id: str) -> AsyncIterator[str]:
 async def job_events(job_id: str) -> StreamingResponse:
     if not STORE.get(job_id):
         raise HTTPException(status_code=404, detail="job not found")
-    return StreamingResponse(_event_stream(job_id), media_type="text/event-stream")
+    # Headers force the upstream proxy (Railway/Caddy/nginx) to flush every
+    # event immediately instead of buffering until the response closes.
+    return StreamingResponse(
+        _event_stream(job_id),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
 
 
 @app.get("/api/jobs/{job_id}/artifact/{name}")
