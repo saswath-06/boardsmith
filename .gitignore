@@ -1,0 +1,58 @@
+# ── Python ──────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+.Python
+*.pyc
+*.pyd
+*.so
+
+# ── Node / Vite ─────────────────────────────────────────────────────────
+node_modules/
+dist/
+dist-ssr/
+.vite/
+*.local
+
+# ── Editor / OS ─────────────────────────────────────────────────────────
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# ── Secrets / env ───────────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# ── Boardsmith runtime artifacts ────────────────────────────────────────
+backend/generated/
+backend/_llm_debug/
+*.kicad_sch
+*.kicad_pro
+*.kicad_pcb
+*.gbr
+*.drl
+*.zip
+_test*.kicad_sch
+
+# ── Logs / cache ────────────────────────────────────────────────────────
+*.log
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+coverage/
+.coverage
+htmlcov/
+
+# ── TypeScript build info ───────────────────────────────────────────────
+*.tsbuildinfo

@@ -1,0 +1,169 @@
+from __future__ import annotations
+
+import json
+import re
+from pathlib import Path
+from typing import Any, Awaitable, Callable
+
+from app.gerber import write_gerber_zip
+from app.kicad_writer import write_kicad_schematic
+from app.llm import fallback_design, parse_circuit_description
+from app.models import BoardLayout, CircuitDesign, PipelineEvent, StageStatus
+from app.pcb_layout import generate_layout, layout_svg, route_layout
+from app.pin_aliases import normalize_design
+from app.schematic import write_schematic_svg
+from app.storage import STORE, JobRecord
+
+
+def _slug(value: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_]+", "_", value).strip("_") or "Boardsmith_Demo"
+
+
+async def _emit(job_id: str, stage: str, status: StageStatus, message: str, data: Any = None) -> None:
+    if hasattr(data, "model_dump"):
+        data = data.model_dump(mode="json")
+    elif isinstance(data, list):
+        data = [item.model_dump(mode="json") if hasattr(item, "model_dump") else item for item in data]
+    await STORE.add_event(job_id, PipelineEvent(stage=stage, status=status, data=data, message=message))
+
+
+async def _safe_stage(
+    job: JobRecord,
+    stage: str,
+    running_message: str,
+    complete_message: str,
+    action: Callable[[], Awaitable[Any]],
+    fallback: Callable[[Exception], Any],
+) -> Any:
+    await _emit(job.job_id, stage, StageStatus.running, running_message)
+    try:
+        result = await action()
+        await _emit(job.job_id, stage, StageStatus.complete, complete_message, result)
+        return result
+    except Exception as exc:  # noqa: BLE001
+        result = fallback(exc)
+        await _emit(job.job_id, stage, StageStatus.error, f"Warning: {exc}. Continuing with fallback.", result)
+        return result
+
+
+async def run_pipeline(job: JobRecord) -> None:
+    design: CircuitDesign | None = None
+    layout: BoardLayout | None = None
+    project_name = "Boardsmith_Demo"
+    try:
+        design = await _safe_stage(
+            job,
+            "parse",
+            "Parsing natural language into supported components and nets.",
+            "Circuit JSON generated.",
+            lambda: _async_value(parse_circuit_description(job.description)),
+            lambda exc: fallback_design(job.description, str(exc)),
+        )
+        # Normalize pin aliases (e.g. ANODE→A, vcc→VCC, +5V→VBUS) before any
+        # downstream stage so schematic/PCB/KiCad writers all see canonical names.
+        design = normalize_design(design)
+        project_name = _slug(design.project_name)
+        design_path = job.output_dir / "circuit.json"
+        design_path.write_text(json.dumps(design.model_dump(mode="json"), indent=2), encoding="utf-8")
+        STORE.add_artifact(job.job_id, "circuit_json", design_path)
+        if design.warnings:
+            await _emit(job.job_id, "parse", StageStatus.error, "Warning: parser used assumptions.", {"warnings": design.warnings})
+
+        async def schematic_action() -> dict[str, Any]:
+            svg_path = job.output_dir / "schematic.svg"
+            kicad_path = job.output_dir / f"{project_name}.kicad_sch"
+            svg = write_schematic_svg(design, svg_path)
+            write_kicad_schematic(design, kicad_path, project_name=project_name)
+            STORE.add_artifact(job.job_id, "schematic_svg", svg_path)
+            STORE.add_artifact(job.job_id, "kicad_schematic", kicad_path)
+            return {
+                "svg": svg,
+                "kicad_filename": f"{project_name}.kicad_sch",
+                "artifacts": {
+                    "schematic_svg": f"/api/jobs/{job.job_id}/artifact/schematic_svg",
+                    "kicad_schematic": f"/api/jobs/{job.job_id}/artifact/kicad_schematic",
+                },
+            }
+
+        await _safe_stage(
+            job,
+            "schematic",
+            "Rendering schematic SVG and writing KiCad .kicad_sch output.",
+            "Schematic SVG and KiCad file generated.",
+            schematic_action,
+            lambda exc: {"svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><text x=\"20\" y=\"30\">Schematic fallback</text></svg>", "error": str(exc)},
+        )
+
+        layout = await _safe_stage(
+            job,
+            "pcb_layout",
+            "Placing components and drawing ratsnest connections.",
+            "PCB layout generated.",
+            lambda: _async_value(generate_layout(design)),
+            lambda exc: generate_layout(fallback_design(job.description, str(exc))),
+        )
+        layout_path = job.output_dir / "layout.json"
+        layout_path.write_text(json.dumps(layout.model_dump(mode="json"), indent=2), encoding="utf-8")
+        STORE.add_artifact(job.job_id, "layout_json", layout_path)
+
+        routed = await _safe_stage(
+            job,
+            "routing",
+            "Attempting Lee grid routing with ratsnest fallback.",
+            "Routing stage complete.",
+            lambda: _async_value(route_layout(layout)),
+            lambda exc: layout.model_copy(update={"warnings": [*layout.warnings, str(exc)]}),
+        )
+        layout = routed
+        if layout.warnings:
+            await _emit(job.job_id, "routing", StageStatus.error, "Warning: some routes fell back to ratsnest.", {"warnings": layout.warnings})
+        layout_path.write_text(json.dumps(layout.model_dump(mode="json"), indent=2), encoding="utf-8")
+        pcb_svg_path = job.output_dir / "pcb_layout.svg"
+        pcb_svg_path.write_text(layout_svg(layout), encoding="utf-8")
+        STORE.add_artifact(job.job_id, "pcb_svg", pcb_svg_path)
+
+        await _safe_stage(
+            job,
+            "3d",
+            "Preparing Three.js board visualization data.",
+            "3D board data ready.",
+            lambda: _async_value(
+                {
+                    "board": {"width": layout.width, "height": layout.height, "thickness": 1.6},
+                    "components": [c.model_dump(mode="json") for c in layout.components],
+                    "traces": [t.model_dump(mode="json") for t in layout.traces],
+                    "ratsnest": [r.model_dump(mode="json") for r in layout.ratsnest],
+                }
+            ),
+            lambda exc: {"board": {"width": 120, "height": 85, "thickness": 1.6}, "components": [], "traces": [], "ratsnest": [], "error": str(exc)},
+        )
+
+        async def gerber_action() -> dict[str, Any]:
+            zip_path = write_gerber_zip(layout, job.output_dir, project_name)
+            STORE.add_artifact(job.job_id, "gerbers", zip_path)
+            return {"download_url": f"/api/jobs/{job.job_id}/artifact/gerbers", "filename": zip_path.name}
+
+        await _safe_stage(
+            job,
+            "gerber",
+            "Exporting demo Gerber package.",
+            "Gerber ZIP exported.",
+            gerber_action,
+            lambda exc: {"error": str(exc), "download_url": None},
+        )
+
+        await _emit(
+            job.job_id,
+            "done",
+            StageStatus.complete,
+            "Boardsmith pipeline complete.",
+            STORE.snapshot(job.job_id),
+        )
+    except Exception as exc:  # noqa: BLE001
+        await _emit(job.job_id, "pipeline", StageStatus.error, f"Unexpected pipeline warning: {exc}", None)
+    finally:
+        await STORE.finish(job.job_id)
+
+
+async def _async_value(value: Any) -> Any:
+    return value

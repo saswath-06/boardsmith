@@ -1,0 +1,230 @@
+/* Boardsmith — design tokens & primitives */
+
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@300;400;500;600&family=IBM+Plex+Serif:ital,wght@0,400;0,500;1,400&display=swap');
+
+@import "tailwindcss";
+
+:root {
+  /* surfaces */
+  --bs-bg:        #0a0f1c;
+  --bs-bg-2:      #0e1526;
+  --bs-panel:     #131b30;
+  --bs-panel-2:   #1a2340;
+  --bs-line:      #243152;
+  --bs-line-soft: #1a2340;
+
+  /* type */
+  --bs-fg:        #e8ebf5;
+  --bs-fg-mute:   #9ba6c2;
+  --bs-fg-dim:    #67729a;
+
+  /* accents */
+  --bs-copper:    #c87533;
+  --bs-copper-2:  #e0a458;
+  --bs-gold:      #f5c46b;
+  --bs-cyan:      #22d3ee;
+  --bs-cyan-soft: #0891b2;
+  --bs-lime:      #a3e635;
+  --bs-purple:    #8b5cf6;   /* OSHpark hint */
+  --bs-amber:     #f59e0b;
+  --bs-red:       #ef4444;
+
+  /* semantics */
+  --bs-trace:     var(--bs-copper);
+  --bs-pad:       var(--bs-gold);
+  --bs-substrate: #0d3b22;   /* darker FR4 */
+  --bs-silk:      #f5ead3;
+
+  /* radii / shadow */
+  --bs-r-sm: 4px;
+  --bs-r:    8px;
+  --bs-r-lg: 12px;
+
+  font-family: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+  font-feature-settings: "ss01", "cv11";
+}
+
+html, body {
+  background: var(--bs-bg);
+  color: var(--bs-fg);
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+.font-mono { font-family: 'IBM Plex Mono', ui-monospace, monospace; font-feature-settings: "zero"; }
+.font-serif { font-family: 'IBM Plex Serif', ui-serif, Georgia, serif; }
+
+/* ── Subtle PCB-style page texture ─────────────────────────────────────── */
+.bs-bg-grid {
+  background-color: var(--bs-bg);
+  background-image:
+    linear-gradient(rgba(34, 211, 238, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(34, 211, 238, 0.04) 1px, transparent 1px);
+  background-size: 40px 40px, 40px 40px;
+}
+
+/* ── Panels ────────────────────────────────────────────────────────────── */
+.bs-panel {
+  background: var(--bs-panel);
+  border: 1px solid var(--bs-line);
+  border-radius: var(--bs-r);
+}
+.bs-panel-flat {
+  background: var(--bs-bg-2);
+  border: 1px solid var(--bs-line-soft);
+}
+
+/* Outer-corner brackets — subtle drafting marks on hero card */
+.bs-brackets { position: relative; }
+.bs-brackets::before,
+.bs-brackets::after {
+  content: ""; position: absolute; width: 16px; height: 16px;
+  border: 1.5px solid var(--bs-copper); pointer-events: none;
+}
+.bs-brackets::before { top: -1px; left: -1px; border-right: 0; border-bottom: 0; }
+.bs-brackets::after  { bottom: -1px; right: -1px; border-left: 0; border-top: 0; }
+
+/* ── Buttons ───────────────────────────────────────────────────────────── */
+.bs-btn-primary {
+  background: var(--bs-copper);
+  color: #0a0f1c;
+  border: 1px solid var(--bs-copper-2);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.25),
+    0 1px 0 rgba(0,0,0,0.4),
+    0 6px 20px -8px rgba(200, 117, 51, 0.6);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  transition: all 120ms ease;
+}
+.bs-btn-primary:hover { background: var(--bs-copper-2); }
+.bs-btn-primary:active { transform: translateY(1px); }
+.bs-btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.bs-btn-ghost {
+  background: transparent;
+  color: var(--bs-fg-mute);
+  border: 1px solid var(--bs-line);
+  transition: all 120ms ease;
+}
+.bs-btn-ghost:hover { color: var(--bs-fg); border-color: var(--bs-copper); }
+
+/* ── Status pills (uppercase, tracked, mono) ──────────────────────────── */
+.bs-pill {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ── Animations ────────────────────────────────────────────────────────── */
+@keyframes bs-pulse {
+  0%, 100% { opacity: 0.4; }
+  50%      { opacity: 1; }
+}
+.bs-pulse { animation: bs-pulse 1.6s ease-in-out infinite; }
+
+@keyframes bs-spin { to { transform: rotate(360deg); } }
+.bs-spin {
+  width: 12px; height: 12px;
+  border: 1.5px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: bs-spin 0.8s linear infinite;
+  display: inline-block;
+}
+
+@keyframes bs-trace-flow {
+  to { stroke-dashoffset: -24; }
+}
+.bs-trace-flow {
+  stroke-dasharray: 4 8;
+  animation: bs-trace-flow 1.4s linear infinite;
+}
+
+@keyframes bs-fade-up {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.bs-fade-up { animation: bs-fade-up 200ms ease-out both; }
+
+@keyframes bs-blink { 50% { opacity: 0; } }
+.bs-cursor::after {
+  content: "▌"; color: var(--bs-cyan);
+  animation: bs-blink 1s steps(1) infinite;
+  margin-left: 2px;
+}
+
+/* ── Skeleton ─────────────────────────────────────────────────────────── */
+@keyframes bs-shimmer {
+  0%   { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+.bs-skeleton {
+  background: linear-gradient(90deg, var(--bs-panel) 25%, var(--bs-panel-2) 50%, var(--bs-panel) 75%);
+  background-size: 800px 100%;
+  animation: bs-shimmer 1.6s infinite linear;
+}
+
+/* ── Schematic host: force any backend-supplied <svg> to fit its panel ── */
+.bs-schematic-host > svg {
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  max-height: 100%;
+  display: block;
+}
+
+/* ── Scrollbars ────────────────────────────────────────────────────────── */
+.bs-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+.bs-scroll::-webkit-scrollbar-track { background: transparent; }
+.bs-scroll::-webkit-scrollbar-thumb { background: var(--bs-line); border-radius: 4px; }
+.bs-scroll::-webkit-scrollbar-thumb:hover { background: var(--bs-copper); }
+
+/* ── Tweak-only theme variants ────────────────────────────────────────── */
+.theme-blueprint {
+  --bs-bg:        #0c2a4a;
+  --bs-bg-2:      #0e3158;
+  --bs-panel:     #103963;
+  --bs-panel-2:   #144b7a;
+  --bs-line:      #2563a3;
+  --bs-line-soft: #1c4a85;
+  --bs-fg:        #eaf4ff;
+  --bs-fg-mute:   #a3c6e8;
+  --bs-fg-dim:    #6993c0;
+  --bs-copper:    #f5c46b;
+  --bs-copper-2:  #fde68a;
+  --bs-cyan:      #67e8f9;
+}
+
+.theme-paper {
+  --bs-bg:        #f4ecd8;
+  --bs-bg-2:      #ede2c4;
+  --bs-panel:     #f9f3e1;
+  --bs-panel-2:   #ede2c4;
+  --bs-line:      #b39c6a;
+  --bs-line-soft: #d4c094;
+  --bs-fg:        #1a2340;
+  --bs-fg-mute:   #4a5878;
+  --bs-fg-dim:    #7d8aa8;
+  --bs-copper:    #a85a1f;
+  --bs-copper-2:  #c87533;
+  --bs-cyan:      #0e7490;
+  --bs-lime:      #4d7c0f;
+  --bs-substrate: #4d7c0f;
+  --bs-silk:      #f4ecd8;
+}
+.theme-paper.bs-bg-grid {
+  background-image:
+    linear-gradient(rgba(11, 18, 32, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(11, 18, 32, 0.06) 1px, transparent 1px);
+}
