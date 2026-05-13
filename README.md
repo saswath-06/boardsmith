@@ -321,4 +321,4 @@ Make sure your Supabase **Authentication → URL configuration** lists the Railw
 - Cost estimates assume a 100×100 mm 2-layer board and one-side SMT. Real JLCPCB pricing scales with size, layer count, and finish — treat the number as a "good enough for go/no-go" figure, not a final quote.
 - Generated firmware is a single-file Arduino `.ino` only — no PlatformIO `platformio.ini`, no ESP-IDF / STM32 HAL native projects, no editing inside the tab. The sketch is meant as a starting point you flash, verify, and grow.
 - Public viewers can only see; they can't download artifacts. There's no "unshare from the UI" yet — call `POST /api/jobs/{id}/unpublish` directly if you need to revoke a link.
-- Refinements are text-only. Image-driven refinement is a TODO.
+- Refinements are text-only. Image-driven refinement is a TODO. 
