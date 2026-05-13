@@ -1,4 +1,4 @@
-# Boardsmith
+# Boardsmith (ConHacks Winner)
 
 > Plain English in. Manufacturable PCB out.
 
