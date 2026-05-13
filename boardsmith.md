@@ -5,7 +5,7 @@ PCB design has a massive accessibility problem. The tools are arcane, the learni
 
 ---
 
-## The Problem
+## The Problem 
 
 Designing a PCB today means learning KiCad or Altium, understanding component footprints, manually placing parts, routing traces, running design rule checks, and exporting Gerber files — all before you've ordered a single board. For a simple circuit, this is a 10-hour process for an experienced engineer. For a student or hobbyist, it's a wall they never get past.
 
